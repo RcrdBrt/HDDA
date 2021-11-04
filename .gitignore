@@ -5,3 +5,4 @@ renv.*
 *.pdf
 *.Rproj
 *.csv
+*.gz
