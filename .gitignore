@@ -6,3 +6,4 @@ renv.*
 *.Rproj
 *.csv
 *.gz
+.Rproj.user
