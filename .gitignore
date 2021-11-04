@@ -1,0 +1,6 @@
+renv/
+.R*
+renv.*
+*.html
+*.pdf
+*.Rproj
