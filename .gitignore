@@ -4,3 +4,4 @@ renv.*
 *.html
 *.pdf
 *.Rproj
+*.csv
