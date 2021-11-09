@@ -10,6 +10,9 @@ output: html_notebook
 library(data.table)
 library(Hmisc)
 library(dplyr)
+library(corrplot)
+library(lubridate)
+library(stringr)
 ```
 
 # Data Ingestion
@@ -19,7 +22,7 @@ acc <- fread("archive/accepted_2007_to_2018Q4.csv", sep = ",", header = T)
 ```
 
 ```{r, cache=TRUE}
-acc = acc[,c(
+variables <- c(
   "addr_state",
   "annual_inc",
   "application_type",
@@ -57,9 +60,47 @@ acc = acc[,c(
   "tax_liens",
   "term",
   "total_acc",
-  "total_cu_tl",
+  #"total_cu_tl",
   "verification_status"
-)]
+)
+```
+
+```{r}
+acc <- acc[,..variables]
+acc <- acc[complete.cases(acc),]
+```
+
+```{r}
+write.csv(acc, "archive/accepted_clean.csv")
+
+```
+
+```{r}
+acc <- read.csv("archive/accepted_clean.csv", sep=",",header=T)
+```
+
+```{r}
+acc <- acc %>% mutate(earliest_cr_line=as.numeric(as.POSIXct(my(earliest_cr_line))),
+                      emp_length=str_extract(emp_length, "[0-9]+"))
+  
+acc <- acc[complete.cases(acc),]
+```
+
+```{r}
+corrplot(cor(acc))
+```
+
+
+```{r}
+head(acc)
+```
+```{r}
+corr_variables <- c(
+  "annual_inc",
+  "delinq_2yrs",
+  ""
+)
+
 ```
 
 # Data Preparation
