@@ -1,5 +1,5 @@
 ---
-title: "R Notebook"
+title: "Progetto HDDA AA2021/2022"
 output: html_notebook
 ---
 
@@ -7,22 +7,24 @@ output: html_notebook
 # Libraries
 
 ```{r message=FALSE, warning=FALSE, paged.print=FALSE}
-require(data.table)
-require(Hmisc)
-require(dplyr)
+library(data.table)
+library(Hmisc)
+library(dplyr)
 ```
 
 # Data Ingestion
 
 ```{r message=FALSE, warning=FALSE, cache=TRUE, paged.print=FALSE}
 acc <- fread("archive/accepted_2007_to_2018Q4.csv", sep = ",", header = T)
-rej <- fread("archive/rejected_2007_to_2018Q4.csv", sep = ",", header = T)
 ```
 
-```{r}
-describe(head(acc, n=10000))
+```{r, cache=TRUE}
+describe(head(acc, n=10^5))
 ```
 
+```{r, cache=TRUE}
+describe(head(rej, n=10^5))
+```
 # Data Preparation
 
 
