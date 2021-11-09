@@ -7,3 +7,4 @@ renv.*
 *.csv
 *.gz
 .Rproj.user
+julia/

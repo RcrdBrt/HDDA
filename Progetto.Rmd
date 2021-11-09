@@ -82,14 +82,15 @@ acc <- read.csv("archive/accepted_clean.csv", sep=",",header=T)
 ```{r}
 acc <- acc %>%
   mutate(
-    earliest_cr_line=as.numeric(as.POSIXct(my(earliest_cr_line))),
-    issue_d=as.numeric(as.POSIXct(my(issue_d))),
+    earliest_cr_line=as.numeric(as.POSIXct(lubridate::my(earliest_cr_line))),
+    issue_d=as.numeric(as.POSIXct(lubridate::my(issue_d))),
     emp_length=as.numeric(str_extract(emp_length, "[0-9]+"))
   ) %>%
   mutate(
-    emp_length = ifelse(emp_length < 5, "low", ifelse(emp_length < 10, "mid", "high"))
-  )
-#acc <- acc[complete.cases(acc),]
+    emp_length = case_when(
+      emp_length < 5 ~ "low",
+      emp_length < 10 ~ "mid",
+      T ~"high"))
 ```
 
 ```{r}
