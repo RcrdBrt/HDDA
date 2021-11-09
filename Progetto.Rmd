@@ -19,12 +19,49 @@ acc <- fread("archive/accepted_2007_to_2018Q4.csv", sep = ",", header = T)
 ```
 
 ```{r, cache=TRUE}
-describe(head(acc, n=10^5))
+acc = acc[,c(
+  "addr_state",
+  "annual_inc",
+  "application_type",
+  "delinq_2yrs",
+  "earliest_cr_line",
+  "emp_length",
+  "emp_title",
+  "fico_range_high",
+  "fico_range_low",
+  "grade",
+  "home_ownership",
+  "initial_list_status",
+  "int_rate",
+  "issue_d",
+  "loan_amnt",
+  "loan_status",
+  "mo_sin_old_il_acct",
+  "mo_sin_old_rev_tl_op",
+  "mort_acc",
+  "num_bc_sats",
+  "num_bc_tl",
+  "num_op_rev_tl",
+  "num_rev_accts",
+  "num_rev_tl_bal_gt_0",
+  "num_sats",
+  "open_acc",
+  "pct_tl_nvr_dlq",
+  "percent_bc_gt_75",
+  "pub_rec",
+  "pub_rec_bankruptcies",
+  "purpose",
+  "revol_bal",
+  "revol_util",
+  "sub_grade",
+  "tax_liens",
+  "term",
+  "total_acc",
+  "total_cu_tl",
+  "verification_status"
+)]
 ```
 
-```{r, cache=TRUE}
-describe(head(rej, n=10^5))
-```
 # Data Preparation
 
 
