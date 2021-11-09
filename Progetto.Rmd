@@ -68,6 +68,7 @@ variables <- c(
 ```{r}
 acc <- acc[,..variables]
 acc <- acc[complete.cases(acc),]
+acc = acc[!apply(acc, 1, function(x) any(x=="")),]
 ```
 
 ```{r}
@@ -80,7 +81,7 @@ acc <- read.csv("archive/accepted_clean.csv", sep=",",header=T)
 ```
 
 ```{r}
-acc <- acc %>% mutate(earliest_cr_line=as.numeric(as.POSIXct(my(earliest_cr_line))),
+acc <- acc %>% mutate(earliest_cr_line=as.numeric(as.POSIXct(lubridate::my(earliest_cr_line))),
                       emp_length=str_extract(emp_length, "[0-9]+"))
   
 acc <- acc[complete.cases(acc),]
