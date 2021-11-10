@@ -13,6 +13,7 @@ library(dplyr)
 library(corrplot)
 library(lubridate)
 library(stringr)
+`%notin%` <- Negate(`%in%`)
 ```
 
 # Data Ingestion
@@ -76,13 +77,16 @@ fwrite(acc, "archive/accepted_clean.csv", sep = ",")
 ```
 
 ```{r}
-acc <- read.csv("archive/accepted_clean.csv", sep=",",header=T)
+acc <- fread("archive/accepted_clean.csv", sep=",",header=T)
 ```
 
+# Data Preparation
+
 ```{r}
+acc <- as.data.frame(acc)
 acc <- acc %>%
   mutate(
-    earliest_cr_line=as.numeric(as.POSIXct(lubridate::my(earliest_cr_line))),
+    mo_sin_earliest_cr_line=as.integer(round((as.Date("2018-12-01")-lubridate::my(earliest_cr_line))/(365.25/12))),
     issue_d=as.numeric(as.POSIXct(lubridate::my(issue_d))),
     emp_length=as.numeric(str_extract(emp_length, "[0-9]+"))
   ) %>%
@@ -90,28 +94,131 @@ acc <- acc %>%
     emp_length = case_when(
       emp_length < 5 ~ "low",
       emp_length < 10 ~ "mid",
-      T ~"high"))
+      T ~"high")) %>%
+  select(-earliest_cr_line)
 ```
 
 ```{r}
-corrplot(cor(acc))
+acc <- acc %>% 
+  mutate(fico_mean = (fico_range_high+fico_range_low)/2) %>%
+  select(-fico_range_high, -fico_range_low)
+
+### categorizzare fico_mean? https://www.investopedia.com/terms/f/ficoscore.asp
+
+acc <- acc %>% 
+  mutate(num_not_sats = open_acc - num_sats,
+         num_bc_not_sats = num_bc_tl - num_bc_sats) %>%
+  select(-num_sats, num_bc_sats)
 ```
 
-
-```{r}
-head(acc)
-```
 ```{r}
 corr_variables <- c(
   "annual_inc",
   "delinq_2yrs",
-  ""
+  "mo_sin_earliest_cr_line",
+  "fico_range_high",
+  "fico_range_low",
+  "int_rate",
+  "issue_d",
+  "loan_amnt",
+  "mo_sin_old_il_acct",
+  "mo_sin_old_rev_tl_op",
+  "mort_acc",
+  "num_bc_sats",
+  "num_bc_tl",
+  "num_op_rev_tl",
+  "num_rev_accts",
+  "num_rev_tl_bal_gt_0",
+  "num_sats",
+  "open_acc",
+  "pct_tl_nvr_dlq",
+  "percent_bc_gt_75",
+  "pub_rec",
+  "pub_rec_bankruptcies",
+  "revol_bal",
+  "revol_util",
+  "tax_liens",
+  "total_acc"
 )
-
 ```
 
-# Data Preparation
 
+```{r}
+corrplot(cor(acc[,corr_variables]))
+```
+
+
+```{r}
+cor.mtest <- function(mat, ...) {
+    mat <- as.matrix(mat)
+    n <- ncol(mat)
+    p.mat<- matrix(NA, n, n)
+    diag(p.mat) <- 0
+    for (i in 1:(n - 1)) {
+        for (j in (i + 1):n) {
+            tmp <- cor.test(mat[, i], mat[, j], ...)
+            p.mat[i, j] <- p.mat[j, i] <- tmp$p.value
+        }
+    }
+  colnames(p.mat) <- rownames(p.mat) <- colnames(mat)
+  p.mat
+}
+# matrix of the p-value of the correlation
+p.mat <- cor.mtest(acc[,corr_variables])
+col <- colorRampPalette(c("#BB4444", "#EE9988", "#FFFFFF", "#77AADD", "#4477AA"))
+png(filename = "/Users/alessandro/Desktop/Corrplot_new.png", width = 900, height = 900, type = "cairo")
+corrplot::corrplot(cor(acc[,corr_variables]), method="color", col=col(200),  
+         type="upper", 
+         addCoef.col = "black", # Add coefficient of correlation
+         tl.col="black", tl.srt=45, tl.cex = .7, number.cex=0.75,  #Text label color and rotation
+         # Combine with significance
+         p.mat = p.mat, sig.level = 0.2, insig = "blank", 
+         # hide correlation coefficient on the principal diagonal
+         diag=T 
+         ) 
+dev.off()
+```
+
+```{r}
+ids <- sample(c(1:nrow(acc)), 8e4)
+
+plot(acc[ids,"mo_sin_earliest_cr_line"], acc[ids,"mo_sin_old_rev_tl_op"])
+```
+
+```{r}
+plot(acc[ids, "num_sats"], acc[ids, "open_acc"])
+```
+
+```{r}
+acc_with_current <- acc
+acc <- acc %>% 
+  mutate(y=ifelse(loan_status == "Charged Off", "Default", loan_status)) %>%
+  filter(loan_status %notin% c("Current", "In Grace Period", "Late (16-30 days)", "Late (31-120 days)"))
+```
+
+Possiamo pensare di utilizzare anche i Current tipo con 90% già ripagato. Ma ci servono? No!
+
+
+```{r}
+describe(acc$loan_status)
+```
+
+```{r}
+tr_ids <- sample(c(1:nrow(acc)), 1e5)
+te_ids <- sample(c(1:nrow(acc)) %notin% tr_ids, 1e5)
+
+fit <- glm(y~., acc[tr_ids,] %>% select(-loan_status, -addr_state, -grade, -sub_grade, -emp_title) %>% mutate(y=ifelse(y=="Default",0,1)), family="binomial")
+
+yhat <- predict(fit, acc[te_ids,] %>% select(-loan_status, -addr_state, -grade, -sub_grade, -emp_title))
+ytest <- acc[te_ids, "y"]
+
+InformationValue::confusionMatrix(ytest, yhat)
+```
+
+
+```{r}
+
+```
 
 
 # Data Exploration
