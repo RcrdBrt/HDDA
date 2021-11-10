@@ -134,19 +134,6 @@ acc <- acc %>%
 corrplot(cor(acc[,numeric_variables]))
 ```
 
-```{r}
-acc <- acc %>% 
-  mutate(fico_mean = (fico_range_high+fico_range_low)/2) %>%
-  select(-fico_range_high, -fico_range_low)
-
-### categorizzare fico_mean? https://www.investopedia.com/terms/f/ficoscore.asp
-
-acc <- acc %>% 
-  mutate(num_not_sats = open_acc - num_sats,
-         num_bc_not_sats = num_bc_tl - num_bc_sats) %>%
-  select(-num_sats, num_bc_sats)
-```
-
 
 ```{r}
 cor.mtest <- function(mat, ...) {
@@ -189,6 +176,20 @@ plot(acc[ids,"mo_sin_earliest_cr_line"], acc[ids,"mo_sin_old_rev_tl_op"])
 plot(acc[ids, "num_sats"], acc[ids, "open_acc"])
 ```
 
+
+```{r}
+acc <- acc %>% 
+  mutate(fico_mean = (fico_range_high+fico_range_low)/2) %>%
+  select(-fico_range_high, -fico_range_low)
+
+### categorizzare fico_mean? https://www.investopedia.com/terms/f/ficoscore.asp
+
+acc <- acc %>% 
+  mutate(num_not_sats = open_acc - num_sats,
+         num_bc_not_sats = num_bc_tl - num_bc_sats) %>%
+  select(-num_sats, num_bc_sats)
+```
+
 ```{r}
 acc_with_current <- acc
 acc <- acc %>% 
@@ -198,17 +199,17 @@ acc <- acc %>%
 
 Possiamo pensare di utilizzare anche i Current tipo con 90% già ripagato. Ma ci servono? No!
 
-
 ```{r}
 describe(acc$loan_status)
 ```
 
 
 ```{r}
-train <- acc %>% group_by(y) %>% sample_n(1000) %>% ungroup()
+balanced_acc <- acc %>% group_by(y) %>% sample_n(1e5) %>% ungroup()
 
-train <- acc[tr_ids,]
-test <- acc[-tr_ids,] %>% group_by(y) %>% sample_n(1000) %>% ungroup()
+train <- sample_frac(balanced_acc, 0.8)
+test <- anti_join(balanced_acc,train)
+
 
 fit <- glm(y~., train %>% select(-loan_status, -addr_state, -grade, -sub_grade, -emp_title) %>% mutate(y=ifelse(y=="Default",0,1)), family="binomial")
 
@@ -257,24 +258,33 @@ library(factoextra)
 pca.res <- prcomp(scale(as.matrix(acc[,new_numeric_variables])))
 fviz_eig(pca.res)
 
+print(pca.res$sdev)
+
 acc_pca <- as.data.frame(scale(as.matrix(acc[,new_numeric_variables])) %*% pca.res$rotation)[,1:8]
-acc_pca <- acc_pca %>% cbind(acc %>% select(-new_numeric_variables))
-acc_pca
+#acc_pca <- acc_pca %>% cbind(acc %>% select(-new_numeric_variables))
+acc_pca <- acc_pca %>% cbind(acc%>%select(y))
 ```
 
+
 ```{r}
-tr_ids <- sample(c(1:nrow(acc_pca)), 1e5)
+balanced_acc <- acc_pca %>% group_by(y) %>% sample_n(1e5) %>% ungroup()
 
-train <- acc_pca[tr_ids,]
-test <- acc_pca[-tr_ids,] %>% group_by(y) %>% sample_n(1000) %>% ungroup()
+train <- sample_frac(balanced_acc, 0.8)
+test <- anti_join(balanced_acc,train)
 
-fit <- glm(y~., train %>% select(-loan_status, -addr_state, -grade, -sub_grade, -emp_title) %>% mutate(y=ifelse(y=="Default",0,1)), family="binomial")
+fit <- glm(y~., train %>% mutate(y=ifelse(y=="Default",0,1)), family="binomial")
 
-yhat <- predict(fit, test %>% select(-loan_status, -addr_state, -grade, -sub_grade, -emp_title))
-ytest <- test$y
+yhat <- predict(fit, test )
+
+ytest <- ifelse(test$y == "Default", 0, 1)
 
 InformationValue::confusionMatrix(ytest, yhat)
 ```
+
+```{r}
+InformationValue::plotROC(ytest, yhat)
+```
+
 
 # Data Exploration
 
