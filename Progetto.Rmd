@@ -114,15 +114,7 @@ numeric_variables <- c(
   "tax_liens",
   "total_acc"
 )
-```
 
-
-```{r}
-corrplot(cor(acc[,numeric_variables]))
-```
-
-
-```{r}
 acc <- acc %>%
   mutate(
     mo_sin_earliest_cr_line=as.integer(round((as.Date("2018-12-01")-lubridate::my(earliest_cr_line))/(365.25/12))),
@@ -135,6 +127,11 @@ acc <- acc %>%
       emp_length < 10 ~ "mid",
       T ~"high")) %>%
   select(-earliest_cr_line)
+```
+
+
+```{r}
+corrplot(cor(acc[,numeric_variables]))
 ```
 
 ```{r}
