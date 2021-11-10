@@ -13,6 +13,7 @@ library(dplyr)
 library(corrplot)
 library(lubridate)
 library(stringr)
+library(sampling)
 `%notin%` <- Negate(`%in%`)
 ```
 
@@ -82,37 +83,9 @@ acc <- fread("archive/accepted_clean.csv", sep=",",header=T)
 
 # Data Preparation
 
-```{r}
-acc <- as.data.frame(acc)
-acc <- acc %>%
-  mutate(
-    mo_sin_earliest_cr_line=as.integer(round((as.Date("2018-12-01")-lubridate::my(earliest_cr_line))/(365.25/12))),
-    issue_d=as.numeric(as.POSIXct(lubridate::my(issue_d))),
-    emp_length=as.numeric(str_extract(emp_length, "[0-9]+"))
-  ) %>%
-  mutate(
-    emp_length = case_when(
-      emp_length < 5 ~ "low",
-      emp_length < 10 ~ "mid",
-      T ~"high")) %>%
-  select(-earliest_cr_line)
-```
 
 ```{r}
-acc <- acc %>% 
-  mutate(fico_mean = (fico_range_high+fico_range_low)/2) %>%
-  select(-fico_range_high, -fico_range_low)
-
-### categorizzare fico_mean? https://www.investopedia.com/terms/f/ficoscore.asp
-
-acc <- acc %>% 
-  mutate(num_not_sats = open_acc - num_sats,
-         num_bc_not_sats = num_bc_tl - num_bc_sats) %>%
-  select(-num_sats, num_bc_sats)
-```
-
-```{r}
-corr_variables <- c(
+numeric_variables <- c(
   "annual_inc",
   "delinq_2yrs",
   "mo_sin_earliest_cr_line",
@@ -144,7 +117,37 @@ corr_variables <- c(
 
 
 ```{r}
-corrplot(cor(acc[,corr_variables]))
+corrplot(cor(acc[,numeric_variables]))
+```
+
+
+```{r}
+acc <- as.data.frame(acc)
+acc <- acc %>%
+  mutate(
+    mo_sin_earliest_cr_line=as.integer(round((as.Date("2018-12-01")-lubridate::my(earliest_cr_line))/(365.25/12))),
+    issue_d=as.integer(round((as.Date("2018-12-01")-lubridate::my(issue_d))/(365.25/12))),
+    emp_length=as.numeric(str_extract(emp_length, "[0-9]+"))
+  ) %>%
+  mutate(
+    emp_length = case_when(
+      emp_length < 5 ~ "low",
+      emp_length < 10 ~ "mid",
+      T ~"high")) %>%
+  select(-earliest_cr_line)
+```
+
+```{r}
+acc <- acc %>% 
+  mutate(fico_mean = (fico_range_high+fico_range_low)/2) %>%
+  select(-fico_range_high, -fico_range_low)
+
+### categorizzare fico_mean? https://www.investopedia.com/terms/f/ficoscore.asp
+
+acc <- acc %>% 
+  mutate(num_not_sats = open_acc - num_sats,
+         num_bc_not_sats = num_bc_tl - num_bc_sats) %>%
+  select(-num_sats, num_bc_sats)
 ```
 
 
@@ -164,10 +167,10 @@ cor.mtest <- function(mat, ...) {
   p.mat
 }
 # matrix of the p-value of the correlation
-p.mat <- cor.mtest(acc[,corr_variables])
+p.mat <- cor.mtest(acc[,numeric_variables])
 col <- colorRampPalette(c("#BB4444", "#EE9988", "#FFFFFF", "#77AADD", "#4477AA"))
 png(filename = "/Users/alessandro/Desktop/Corrplot_new.png", width = 900, height = 900, type = "cairo")
-corrplot::corrplot(cor(acc[,corr_variables]), method="color", col=col(200),  
+corrplot::corrplot(cor(acc[,numeric_variables]), method="color", col=col(200),  
          type="upper", 
          addCoef.col = "black", # Add coefficient of correlation
          tl.col="black", tl.srt=45, tl.cex = .7, number.cex=0.75,  #Text label color and rotation
@@ -203,23 +206,78 @@ Possiamo pensare di utilizzare anche i Current tipo con 90% già ripagato. Ma ci
 describe(acc$loan_status)
 ```
 
+
 ```{r}
 tr_ids <- sample(c(1:nrow(acc)), 1e5)
-te_ids <- sample(c(1:nrow(acc)) %notin% tr_ids, 1e5)
 
-fit <- glm(y~., acc[tr_ids,] %>% select(-loan_status, -addr_state, -grade, -sub_grade, -emp_title) %>% mutate(y=ifelse(y=="Default",0,1)), family="binomial")
+train <- acc[tr_ids,]
+test <- acc[-tr_ids,] %>% group_by(y) %>% sample_n(1000) %>% ungroup()
 
-yhat <- predict(fit, acc[te_ids,] %>% select(-loan_status, -addr_state, -grade, -sub_grade, -emp_title))
-ytest <- acc[te_ids, "y"]
+fit <- glm(y~., train %>% select(-loan_status, -addr_state, -grade, -sub_grade, -emp_title) %>% mutate(y=ifelse(y=="Default",0,1)), family="binomial")
+
+yhat <- predict(fit, test %>% select(-loan_status, -addr_state, -grade, -sub_grade, -emp_title))
+ytest <- test$y
 
 InformationValue::confusionMatrix(ytest, yhat)
 ```
 
 
-```{r}
 
+```{r}
+new_numeric_variables <- c(
+  "annual_inc",
+  "delinq_2yrs",
+  "mo_sin_earliest_cr_line",
+  "fico_mean",
+  "int_rate",
+  "issue_d",
+  "loan_amnt",
+  "mo_sin_old_il_acct",
+  "mo_sin_old_rev_tl_op",
+  "mort_acc",
+  "num_bc_not_sats",
+  "num_bc_tl",
+  "num_op_rev_tl",
+  "num_rev_accts",
+  "num_rev_tl_bal_gt_0",
+  "num_not_sats",
+  "open_acc",
+  "pct_tl_nvr_dlq",
+  "percent_bc_gt_75",
+  "pub_rec",
+  "pub_rec_bankruptcies",
+  "revol_bal",
+  "revol_util",
+  "tax_liens",
+  "total_acc"
+)
 ```
 
+```{r}
+#PCA
+library(factoextra)
+
+pca.res <- prcomp(scale(as.matrix(acc[,new_numeric_variables])))
+fviz_eig(pca.res)
+
+acc_pca <- as.data.frame(scale(as.matrix(acc[,new_numeric_variables])) %*% pca.res$rotation)[,1:8]
+acc_pca <- acc_pca %>% cbind(acc %>% select(-new_numeric_variables))
+acc_pca
+```
+
+```{r}
+tr_ids <- sample(c(1:nrow(acc_pca)), 1e5)
+
+train <- acc_pca[tr_ids,]
+test <- acc_pca[-tr_ids,] %>% group_by(y) %>% sample_n(1000) %>% ungroup()
+
+fit <- glm(y~., train %>% select(-loan_status, -addr_state, -grade, -sub_grade, -emp_title) %>% mutate(y=ifelse(y=="Default",0,1)), family="binomial")
+
+yhat <- predict(fit, test %>% select(-loan_status, -addr_state, -grade, -sub_grade, -emp_title))
+ytest <- test$y
+
+InformationValue::confusionMatrix(ytest, yhat)
+```
 
 # Data Exploration
 
