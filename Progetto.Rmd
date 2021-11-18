@@ -150,26 +150,26 @@ describe(acc$loan_status)
 ### numero di osservazioni / tempo
 
 ```{r}
-source("plot_osservazioni_e_tempo.R")
+source("data_preparation/plot_osservazioni_e_tempo.R")
 ```
 
 ### Pie chart default vs fully paid
 
 ```{r}
-source("pie_chart_default_VS_fully_paid.R")
+source("data_preparation/pie_chart_default_VS_fully_paid.R")
 ```
 
 ### ROI boxplot/violinplot (for each grade?)
 
 ```{r}
-source("ROI_violin.R")
+source("data_preparation/ROI_violin.R")
 ```
 
 
 ### Violin plot for each numeric variable and barplot for categorical variables
 
 ```{r}
-source("all_violin.R")
+source("data_preparation/all_violin.R")
 ```
 
 
