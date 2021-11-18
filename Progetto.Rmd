@@ -14,6 +14,9 @@ library(corrplot)
 library(lubridate)
 library(stringr)
 library(sampling)
+library(leaps)
+#library(bestglm)
+library(future.apply)
 `%notin%` <- Negate(`%in%`)
 ```
 
@@ -93,7 +96,6 @@ numeric_variables <- c(
   "fico_range_high",
   "fico_range_low",
   "int_rate",
-  "issue_d",
   "loan_amnt",
   "mo_sin_old_il_acct",
   "mo_sin_old_rev_tl_op",
@@ -118,7 +120,7 @@ numeric_variables <- c(
 acc <- acc %>%
   mutate(
     mo_sin_earliest_cr_line=as.integer(round((as.Date("2018-12-01")-lubridate::my(earliest_cr_line))/(365.25/12))),
-    issue_d=as.integer(round((as.Date("2018-12-01")-lubridate::my(issue_d))/(365.25/12))),
+    issue_d = lubridate::my(issue_d),
     emp_length=as.numeric(str_extract(emp_length, "[0-9]+"))
   ) %>%
   mutate(
@@ -142,6 +144,9 @@ Possiamo pensare di utilizzare anche i Current tipo con 90% già ripagato. Ma ci
 describe(acc$loan_status)
 ```
 
+```{r}
+source("data_preparation/outliers.R", print.eval = T)
+```
 
 
 
@@ -150,26 +155,26 @@ describe(acc$loan_status)
 ### numero di osservazioni / tempo
 
 ```{r}
-source("data_preparation/plot_osservazioni_e_tempo.R")
+source("data_preparation/plot_osservazioni_e_tempo.R", print.eval = T)
 ```
 
 ### Pie chart default vs fully paid
 
 ```{r}
-source("data_preparation/pie_chart_default_VS_fully_paid.R")
+source("data_preparation/pie_chart_default_VS_fully_paid.R", print.eval = T)
 ```
 
 ### ROI boxplot/violinplot (for each grade?)
 
 ```{r}
-source("data_preparation/ROI_violin.R")
+source("data_preparation/ROI_violin.R", print.eval = T)
 ```
 
 
 ### Violin plot for each numeric variable and barplot for categorical variables
 
 ```{r}
-source("data_preparation/all_violin.R")
+source("data_preparation/all_violin.R", print.eval = T)
 ```
 
 
@@ -272,18 +277,19 @@ corrplot(cor(acc[, new_numeric_variables]))
 # Modeling
 
 ```{r}
-balanced_acc <- acc %>% group_by(y) %>% sample_n(1e5) %>% ungroup()
+acc.balanced100k <- acc %>% group_by(y) %>% sample_n(1e5) %>% ungroup()
 
-train <- sample_frac(balanced_acc, 0.8)
-test <- anti_join(balanced_acc,train)
+train.balanced100k <- sample_frac(acc.balanced100k, 0.8)
+test.balanced100k <- anti_join(acc.balanced100k,train.balanced100k)
 
 
-fit <- glm(y~., train %>% select(-loan_status, -addr_state, -grade, -sub_grade, -emp_title) %>% mutate(y=ifelse(y=="Default",0,1)), family="binomial")
+fit.balanced100k <- glm(y~., train.balanced100k %>% select(-loan_status, -addr_state, -grade, -sub_grade, -emp_title) %>% mutate(y=ifelse(y=="Default",0,1)), family="binomial")
 
-yhat <- predict(fit, test %>% select(-loan_status, -addr_state, -grade, -sub_grade, -emp_title))
-ytest <- test$y
+yhat.balanced100k <- predict(fit.balanced100k, test.balanced100k %>% select(-loan_status, -addr_state, -grade, -sub_grade, -emp_title))
 
-InformationValue::confusionMatrix(ytest, yhat)
+ytest.balanced100k <- test.balanced100k$y
+
+InformationValue::confusionMatrix(ytest.balanced100k, yhat.balanced100k)
 ```
 
 
@@ -303,22 +309,33 @@ acc_pca <- acc_pca %>% cbind(acc%>%select(y))
 
 
 ```{r}
-balanced_acc <- acc_pca %>% group_by(y) %>% sample_n(1e5) %>% ungroup()
+acc.balanced100k.pca <- acc_pca %>% group_by(y) %>% sample_n(1e5) %>% ungroup()
 
-train <- sample_frac(balanced_acc, 0.8)
-test <- anti_join(balanced_acc,train)
+train.balanced100k.pca <- sample_frac(acc.balanced100k.pca, 0.8)
+test.balanced100k.pca <- anti_join(acc.balanced100k.pca,train.balanced100k.pca)
 
-fit <- glm(y~., train %>% mutate(y=ifelse(y=="Default",0,1)), family="binomial")
+fit.balanced100k.pca <- glm(y~., train.balanced100k.pca %>% mutate(y=ifelse(y=="Default",0,1)), family="binomial")
 
-yhat <- predict(fit, test )
+yhat.balanced100k.pca <- predict(fit.balanced100k.pca, test.balanced100k.pca)
 
-ytest <- ifelse(test$y == "Default", 0, 1)
+ytest.balanced100k.pca <- ifelse(test.balanced100k.pca$y == "Default", 0, 1)
 
-InformationValue::confusionMatrix(ytest, yhat)
+InformationValue::confusionMatrix(ytest.balanced100k.pca, yhat.balanced100k.pca)
 ```
 
 ```{r}
-InformationValue::plotROC(ytest, yhat)
+InformationValue::plotROC(ytest.balanced100k.pca, yhat.balanced100k.pca)
+```
+
+
+## Best Subset Selection (BSS)
+```{r}
+acc.balanced10k = acc.balanced100k %>%group_by(y) %>% sample_n(1e4) %>% ungroup()
+
+train.balanced10k = sample_frac(acc.balanced10k, 0.8)
+test.balanced10k.pca <- anti_join(acc.balanced10k,train)
+
+fit.balanced10k.bss = regsubsets(y ~ ., train.balanced10k)
 ```
 
 
