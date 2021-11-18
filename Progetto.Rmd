@@ -146,6 +146,7 @@ describe(acc$loan_status)
 
 
 # Data Exploration
+
 ### numero di osservazioni / tempo
 ### Pie chart default vs fully paid
 ### ROI boxplot/violinplot (for each grade?)
@@ -157,7 +158,6 @@ describe(acc$loan_status)
 ```{r}
 corrplot(cor(acc[,numeric_variables]))
 ```
-
 
 ```{r}
 cor.mtest <- function(mat, ...) {
@@ -192,14 +192,12 @@ dev.off()
 
 ```{r}
 ids <- sample(c(1:nrow(acc)), 8e4)
-
 plot(acc[ids,"mo_sin_earliest_cr_line"], acc[ids,"mo_sin_old_rev_tl_op"])
 ```
 
 ```{r}
 plot(acc[ids, "num_sats"], acc[ids, "open_acc"])
 ```
-
 
 ```{r}
 acc <- acc %>% 
@@ -246,8 +244,11 @@ new_numeric_variables <- c(
 ```
 
 
-# Modeling
+```{r}
+corrplot(cor(acc[, new_numeric_variables]))
+```
 
+# Modeling
 
 ```{r}
 balanced_acc <- acc %>% group_by(y) %>% sample_n(1e5) %>% ungroup()
