@@ -43,6 +43,7 @@ variables <- c(
   "int_rate",
   "issue_d",
   "loan_amnt",
+  "funded_amnt",
   "loan_status",
   "mo_sin_old_il_acct",
   "mo_sin_old_rev_tl_op",
@@ -73,7 +74,7 @@ variables <- c(
 ```{r}
 acc <- acc[,..variables]
 acc <- acc[complete.cases(acc),]
-acc <- acc[!apply(acc, 1, function(x) any(x=="")),]
+acc <- acc[!future_apply(acc, 1, function(x) any(x=="")),]
 ```
 
 ```{r}
@@ -97,6 +98,7 @@ numeric_variables <- c(
   "fico_range_low",
   "int_rate",
   "loan_amnt",
+  "funded_amnt",
   "mo_sin_old_il_acct",
   "mo_sin_old_rev_tl_op",
   "mort_acc",
