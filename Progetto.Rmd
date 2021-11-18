@@ -129,6 +129,31 @@ acc <- acc %>%
   select(-earliest_cr_line)
 ```
 
+```{r}
+acc_with_current <- acc
+acc <- acc %>% 
+  mutate(y=ifelse(loan_status == "Charged Off", "Default", loan_status)) %>%
+  filter(loan_status %notin% c("Current", "In Grace Period", "Late (16-30 days)", "Late (31-120 days)"))
+```
+
+Possiamo pensare di utilizzare anche i Current tipo con 90% già ripagato. Ma ci servono? No!
+
+```{r}
+describe(acc$loan_status)
+```
+
+
+
+
+# Data Exploration
+
+### Pie chart default vs fully paid
+### ROI boxplot/violinplot (for each grade?)
+### Corrplot
+### Violin plot for each numeric variable and barplot for categorical variables
+
+### Investigate correlations and fix
+
 
 ```{r}
 corrplot(cor(acc[,numeric_variables]))
@@ -190,36 +215,6 @@ acc <- acc %>%
   select(-num_sats, num_bc_sats)
 ```
 
-```{r}
-acc_with_current <- acc
-acc <- acc %>% 
-  mutate(y=ifelse(loan_status == "Charged Off", "Default", loan_status)) %>%
-  filter(loan_status %notin% c("Current", "In Grace Period", "Late (16-30 days)", "Late (31-120 days)"))
-```
-
-Possiamo pensare di utilizzare anche i Current tipo con 90% già ripagato. Ma ci servono? No!
-
-```{r}
-describe(acc$loan_status)
-```
-
-
-```{r}
-balanced_acc <- acc %>% group_by(y) %>% sample_n(1e5) %>% ungroup()
-
-train <- sample_frac(balanced_acc, 0.8)
-test <- anti_join(balanced_acc,train)
-
-
-fit <- glm(y~., train %>% select(-loan_status, -addr_state, -grade, -sub_grade, -emp_title) %>% mutate(y=ifelse(y=="Default",0,1)), family="binomial")
-
-yhat <- predict(fit, test %>% select(-loan_status, -addr_state, -grade, -sub_grade, -emp_title))
-ytest <- test$y
-
-InformationValue::confusionMatrix(ytest, yhat)
-```
-
-
 
 ```{r}
 new_numeric_variables <- c(
@@ -250,6 +245,26 @@ new_numeric_variables <- c(
   "total_acc"
 )
 ```
+
+
+# Modeling
+
+
+```{r}
+balanced_acc <- acc %>% group_by(y) %>% sample_n(1e5) %>% ungroup()
+
+train <- sample_frac(balanced_acc, 0.8)
+test <- anti_join(balanced_acc,train)
+
+
+fit <- glm(y~., train %>% select(-loan_status, -addr_state, -grade, -sub_grade, -emp_title) %>% mutate(y=ifelse(y=="Default",0,1)), family="binomial")
+
+yhat <- predict(fit, test %>% select(-loan_status, -addr_state, -grade, -sub_grade, -emp_title))
+ytest <- test$y
+
+InformationValue::confusionMatrix(ytest, yhat)
+```
+
 
 ```{r}
 #PCA
@@ -284,13 +299,6 @@ InformationValue::confusionMatrix(ytest, yhat)
 ```{r}
 InformationValue::plotROC(ytest, yhat)
 ```
-
-
-# Data Exploration
-
-
-
-# Modeling
 
 
 
