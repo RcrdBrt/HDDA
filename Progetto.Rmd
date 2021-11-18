@@ -146,10 +146,9 @@ describe(acc$loan_status)
 
 
 # Data Exploration
-
+### numero di osservazioni / tempo
 ### Pie chart default vs fully paid
 ### ROI boxplot/violinplot (for each grade?)
-### Corrplot
 ### Violin plot for each numeric variable and barplot for categorical variables
 
 ### Investigate correlations and fix
@@ -178,7 +177,7 @@ cor.mtest <- function(mat, ...) {
 # matrix of the p-value of the correlation
 p.mat <- cor.mtest(acc[,numeric_variables])
 col <- colorRampPalette(c("#BB4444", "#EE9988", "#FFFFFF", "#77AADD", "#4477AA"))
-png(filename = "/Users/alessandro/Desktop/Corrplot_new.png", width = 900, height = 900, type = "cairo")
+png(filename = tempfile(pattern="file", tmpdir=tempdir(), fileext = "png"), width = 900, height = 900, type = "cairo")
 corrplot::corrplot(cor(acc[,numeric_variables]), method="color", col=col(200),  
          type="upper", 
          addCoef.col = "black", # Add coefficient of correlation
