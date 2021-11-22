@@ -34,7 +34,7 @@ variables <- c(
   "delinq_2yrs",
   "earliest_cr_line",
   "emp_length",
-  "emp_title",
+  #"emp_title", # troppi livelli
   "fico_range_high",
   "fico_range_low",
   "grade",
@@ -143,20 +143,27 @@ acc <- acc %>%
     addr_state %in% c("AR", "LA", "MS", "KY", "TN", "AL", "GA", "FL", "NC", "SC", "VA", "WV") ~ "South East",
     addr_state %in% c("ME", "VT", "NH", "MA", "RI", "CT") ~ "New England",
     addr_state %in% c("NY", "PA", "NJ", "MD", "DE") ~ "Mid Atlantic",
-  )) %>% mutate(addr_state=as.factor(addr_state)) %>% 
-  mutate(y=as.factor(y)) %>% 
-  mutate(application_type=as.factor(application_type)) %>% 
-  mutate(emp_length=as.factor(emp_length)) %>%
-  mutate(emp_title=as.factor(emp_title)) %>% 
-  mutate(grade=as.factor(grade)) %>% 
-  mutate(home_ownership=as.factor(home_ownership)) %>% 
-  mutate(initial_list_status=as.factor(initial_list_status)) %>% 
-  mutate(loan_status=as.factor(loan_status)) %>% 
-  mutate(purpose=as.factor(purpose)) %>% 
-  mutate(sub_grade=as.factor(sub_grade)) %>%
-  mutate(term=as.factor(term)) %>% 
-  mutate(verification_status=as.factor(verification_status)) %>% 
-  mutate(y=as.factor(y))
+  )) %>%
+  # livelli erano molto sbilanciati, optato per 3 livelli
+  mutate(purpose=case_when(
+    purpose %in% c("debt_consolidation") ~ "debt_consolidation",
+    purpose %in% c("credit_card") ~ "credit_card",
+    T ~ "other"
+  )) %>% 
+  mutate(
+    addr_state=as.factor(addr_state),
+    y=as.factor(y),
+    application_type=as.factor(application_type),
+    emp_length=as.factor(emp_length),
+    grade=as.factor(grade),
+    home_ownership=as.factor(home_ownership),
+    initial_list_status=as.factor(initial_list_status),
+    loan_status=as.factor(loan_status),
+    purpose=as.factor(purpose),
+    sub_grade=as.factor(sub_grade),
+    term=as.factor(term),
+    verification_status=as.factor(verification_status),
+  ) 
 ```
 
 Possiamo pensare di utilizzare anche i Current tipo con 90% già ripagato. Ma ci servono? No!
@@ -311,18 +318,18 @@ corrplot(cor(acc[, new_numeric_variables]))
 # Modeling
 
 ```{r}
-acc.balanced100k <- acc %>% group_by(y) %>% sample_n(1e5) %>% ungroup()
+acc.balanced1k <- acc %>% group_by(y) %>% sample_n(1e3) %>% ungroup()
 
-train.balanced100k <- sample_frac(acc.balanced100k, 0.8)
-test.balanced100k <- anti_join(acc.balanced100k,train.balanced100k)
+train.balanced1k <- sample_frac(acc.balanced1k, 0.8)
+test.balanced1k <- anti_join(acc.balanced1k,train.balanced1k)
 
-fit.balanced100k <- glm(y~., train.balanced100k, family="binomial")
+fit.balanced1k <- glm(y~., train.balanced1k %>% select(-), family="binomial")
 
-yhat.balanced100k <- predict(fit.balanced100k, test.balanced100k %>% select(-loan_status, -grade, -sub_grade, -emp_title))
+yhat.balanced1k <- predict(fit.balanced1k, test.balanced1k)
 
-ytest.balanced100k <- test.balanced100k$y
+ytest.balanced1k <- test.balanced1k$y
 
-InformationValue::confusionMatrix(ytest.balanced100k, yhat.balanced100k)
+InformationValue::confusionMatrix(ytest.balanced1k, yhat.balanced1k)
 ```
 
 
