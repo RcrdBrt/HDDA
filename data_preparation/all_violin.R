@@ -1,6 +1,7 @@
 require(reshape2)
+require(patchwork)
 
-ids <- sample(c(1:nrow(acc)), 2e5)
+ids <- sample(c(1:nrow(acc)), 2e3)
 small_acc <- acc[ids,]
 
 GeomSplitViolin <- ggproto("GeomSplitViolin", GeomViolin,
@@ -66,12 +67,42 @@ make_violin <- function(data=acc, variables, title="Distribuzioni"){
           axis.title = element_blank(),
           axis.text.x = element_blank(),
           legend.position = "none", 
-          strip.text = element_text(size=14,face="bold"))
+          strip.text = element_text(size=8,face="bold"))
 }
 
+make_barplot <- function(data=acc, variables, title="Distribuzioni"){
+  p <- list()
+  for (i in 1:length(variables)){
+    p[[i]] <- 
+      ggplot(small_acc, aes_string(x = 1, fill = variables[i])) + 
+      geom_bar(position = "fill", width = 0.3) +
+      scale_y_continuous(labels = scales::percent) +
+      ggtitle(variables[i]) +
+      theme_minimal() + 
+      theme(plot.title = element_text(hjust = 0.5, size=8, face="bold"),
+            axis.text=element_text(size=8),
+            axis.title=element_text(size=8,face="bold"),
+            axis.title.x=element_blank(),
+            axis.text.x=element_blank(),
+            axis.ticks.x=element_blank(),
+            legend.position = "bottom", 
+            legend.title = element_blank(),
+            legend.box="vertical",
+            legend.text = element_text(size=6)) +
+      guides(fill=guide_legend(nrow=2,byrow=TRUE))
+  }
+  p[[1]] <- p[[1]] + ylab("Percentuale osservazioni")
+  (p[[1]] | p[[2]] | p[[3]])
+}
 
 make_violin(small_acc,numeric_variables[1:6], title="Distribuzioni")
 make_violin(small_acc,numeric_variables[7:12], title="")
 make_violin(small_acc,numeric_variables[13:18], title="")
 make_violin(small_acc,numeric_variables[19:24], title="")
 make_violin(small_acc,numeric_variables[25], title="")
+
+make_barplot(small_acc, c("application_type", "emp_length", "emp_title"))
+make_barplot(small_acc, c("grade", "home_ownership", "initial_list_status"))
+make_barplot(small_acc, c("purpose", "term", "verification_status"))
+
+

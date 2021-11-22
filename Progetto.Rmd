@@ -16,7 +16,7 @@ library(stringr)
 library(sampling)
 library(leaps)
 #library(bestglm)
-library(future.apply)
+library(factoextra)
 `%notin%` <- Negate(`%in%`)
 ```
 
@@ -34,7 +34,7 @@ variables <- c(
   "delinq_2yrs",
   "earliest_cr_line",
   "emp_length",
-  "emp_title",
+  #"emp_title", # troppi livelli
   "fico_range_high",
   "fico_range_low",
   "grade",
@@ -81,14 +81,9 @@ acc <- acc[!apply(acc, 1, function(x) any(x=="")),]
 fwrite(acc, "archive/accepted_clean.csv", sep = ",")
 ```
 
+# Data Preparation
 ```{r}
 acc <- fread("archive/accepted_clean.csv", sep=",",header=T)
-```
-
-# Data Preparation
-
-
-```{r}
 acc <- as.data.frame(acc)
 numeric_variables <- c(
   "annual_inc",
@@ -131,13 +126,44 @@ acc <- acc %>%
       emp_length < 10 ~ "mid",
       T ~"high")) %>%
   select(-earliest_cr_line)
-```
-
-```{r}
 acc_with_current <- acc
 acc <- acc %>% 
-  mutate(y=ifelse(loan_status == "Charged Off", "Default", loan_status)) %>%
-  filter(loan_status %notin% c("Current", "In Grace Period", "Late (16-30 days)", "Late (31-120 days)"))
+  filter(loan_status %notin% c("Current", "In Grace Period", "Late (16-30 days)")) %>%
+  mutate(y=case_when(
+    loan_status == "Late (31-120 days)" ~ 0,
+    loan_status == "Charged Off" ~ 0,
+    loan_status == "Default" ~ 0,
+    loan_status == "Fully Paid" ~ 1
+  )) %>%
+  mutate(addr_state=case_when(
+    addr_state %in% c("WA", "OR", "CA", "HI", "AL", "AK") ~ "West Coast",
+    addr_state %in% c("MT", "ID", "NV", "UT", "CO", "WY") ~ "The Rocky Mountains",
+    addr_state %in% c("AZ", "NM", "TX", "OK") ~ "South West",
+    addr_state %in% c("ND", "SD", "NE", "KS", "MN", "IA", "MO", "WI", "IL", "IN", "MI", "OH") ~ "Midwest",
+    addr_state %in% c("AR", "LA", "MS", "KY", "TN", "AL", "GA", "FL", "NC", "SC", "VA", "WV") ~ "South East",
+    addr_state %in% c("ME", "VT", "NH", "MA", "RI", "CT") ~ "New England",
+    addr_state %in% c("NY", "PA", "NJ", "MD", "DE") ~ "Mid Atlantic",
+  )) %>%
+  # livelli erano molto sbilanciati, optato per 3 livelli
+  mutate(purpose=case_when(
+    purpose %in% c("debt_consolidation") ~ "debt_consolidation",
+    purpose %in% c("credit_card") ~ "credit_card",
+    T ~ "other"
+  )) %>% 
+  mutate(
+    addr_state=as.factor(addr_state),
+    y=as.factor(y),
+    application_type=as.factor(application_type),
+    emp_length=as.factor(emp_length),
+    grade=as.factor(grade),
+    home_ownership=as.factor(home_ownership),
+    initial_list_status=as.factor(initial_list_status),
+    loan_status=as.factor(loan_status),
+    purpose=as.factor(purpose),
+    sub_grade=as.factor(sub_grade),
+    term=as.factor(term),
+    verification_status=as.factor(verification_status),
+  ) %>% select(-loan_status)
 ```
 
 Possiamo pensare di utilizzare anche i Current tipo con 90% già ripagato. Ma ci servono? No!
@@ -203,9 +229,10 @@ cor.mtest <- function(mat, ...) {
   p.mat
 }
 # matrix of the p-value of the correlation
+chart_pic_file = tempfile(pattern="file", tmpdir=tempdir(), fileext = ".png")
 p.mat <- cor.mtest(acc[,numeric_variables])
 col <- colorRampPalette(c("#BB4444", "#EE9988", "#FFFFFF", "#77AADD", "#4477AA"))
-png(filename = tempfile(pattern="file", tmpdir=tempdir(), fileext = "png"), width = 900, height = 900, type = "cairo")
+png(filename = chart_pic_file, width = 900, height = 900, type = "cairo")
 corrplot::corrplot(cor(acc[,numeric_variables]), method="color", col=col(200),  
          type="upper", 
          addCoef.col = "black", # Add coefficient of correlation
@@ -214,9 +241,13 @@ corrplot::corrplot(cor(acc[,numeric_variables]), method="color", col=col(200),
          p.mat = p.mat, sig.level = 0.2, insig = "blank", 
          # hide correlation coefficient on the principal diagonal
          diag=T 
-         ) 
-dev.off()
+         )
 ```
+
+```{r pressure, out.width= '100%'}
+knitr::include_graphics(chart_pic_file)
+```
+
 
 ```{r}
 ids <- sample(c(1:nrow(acc)), 8e4)
@@ -228,11 +259,18 @@ plot(acc[ids, "num_sats"], acc[ids, "open_acc"])
 ```
 
 ```{r}
+### categorizzazione fico_mean (https://www.investopedia.com/terms/f/ficoscore.asp)
 acc <- acc %>% 
   mutate(fico_mean = (fico_range_high+fico_range_low)/2) %>%
-  select(-fico_range_high, -fico_range_low)
+  select(-fico_range_high, -fico_range_low) %>% 
+  mutate(fico_class=case_when(
+    fico_mean <= 580 ~ "Poor",
+    fico_mean > 580 & fico_mean <= 669 ~ "Fair",
+    fico_mean > 670 & fico_mean <= 739 ~ "Good",
+    fico_mean > 740 & fico_mean <= 799 ~ "Very Good",
+    fico_mean > 800 ~ "Exceptional"
+  )) %>% select(-fico_mean) %>% mutate(fico_class=as.factor(fico_class))
 
-### categorizzare fico_mean? https://www.investopedia.com/terms/f/ficoscore.asp
 
 acc <- acc %>% 
   mutate(num_not_sats = open_acc - num_sats,
@@ -242,11 +280,12 @@ acc <- acc %>%
 
 
 ```{r}
+# tolte le correlazioni, restano queste variabili esplicative numeriche
 new_numeric_variables <- c(
   "annual_inc",
   "delinq_2yrs",
   "mo_sin_earliest_cr_line",
-  "fico_mean",
+  #"fico_mean",
   "int_rate",
   #"issue_d",
   "loan_amnt",
@@ -279,65 +318,61 @@ corrplot(cor(acc[, new_numeric_variables]))
 # Modeling
 
 ```{r}
-acc.balanced100k <- acc %>% group_by(y) %>% sample_n(1e5) %>% ungroup()
+set.seed(1000)
+acc.balanced <- acc %>% group_by(y) %>% sample_n(min(summary(acc$y))) %>% ungroup()
 
-train.balanced100k <- sample_frac(acc.balanced100k, 0.8)
-test.balanced100k <- anti_join(acc.balanced100k,train.balanced100k)
+train.balanced = sample_frac(acc.balanced, 0.8)
+test.balanced = anti_join(acc.balanced,train.balanced)
+ystar = test.balanced$y
+
+```
 
 
-fit.balanced100k <- glm(y~., train.balanced100k %>% select(-loan_status, -addr_state, -grade, -sub_grade, -emp_title) %>% mutate(y=ifelse(y=="Default",0,1)), family="binomial")
+```{r}
+fit.glm <- glm(y~., train.balanced, family="binomial")
 
-yhat.balanced100k <- predict(fit.balanced100k, test.balanced100k %>% select(-loan_status, -addr_state, -grade, -sub_grade, -emp_title))
+yhat.glm <- predict(fit.glm, test.balanced)
 
-ytest.balanced100k <- test.balanced100k$y
-
-InformationValue::confusionMatrix(ytest.balanced100k, yhat.balanced100k)
+InformationValue::confusionMatrix(ystar, yhat.glm-1)
 ```
 
 
 ```{r}
 #PCA
-library(factoextra)
-
 pca.res <- prcomp(scale(as.matrix(acc[,new_numeric_variables])))
 fviz_eig(pca.res)
 
 print(pca.res$sdev)
 
-acc_pca <- as.data.frame(scale(as.matrix(acc[,new_numeric_variables])) %*% pca.res$rotation)[,1:8]
+acc_pca <- as.data.frame(scale(as.matrix(acc[,new_numeric_variables])) %*% pca.res$rotation)[,1:8] # prime otto variabili
 #acc_pca <- acc_pca %>% cbind(acc %>% select(-new_numeric_variables))
 acc_pca <- acc_pca %>% cbind(acc%>%select(y))
 ```
 
 
 ```{r}
-acc.balanced100k.pca <- acc_pca %>% group_by(y) %>% sample_n(1e5) %>% ungroup()
+acc.balanced.pca <- acc_pca %>% group_by(y) %>% sample_n(min(summary(acc_pca$y))) %>% ungroup()
 
-train.balanced100k.pca <- sample_frac(acc.balanced100k.pca, 0.8)
-test.balanced100k.pca <- anti_join(acc.balanced100k.pca,train.balanced100k.pca)
+train.balanced.pca <- sample_frac(acc.balanced.pca, 0.8)
+test.balanced.pca <- anti_join(acc.balanced.pca,train.balanced.pca)
 
-fit.balanced100k.pca <- glm(y~., train.balanced100k.pca %>% mutate(y=ifelse(y=="Default",0,1)), family="binomial")
+fit.pca <- glm(y~., train.balanced.pca, family="binomial")
 
-yhat.balanced100k.pca <- predict(fit.balanced100k.pca, test.balanced100k.pca)
+yhat.pca <- predict(fit.pca, test.balanced.pca)
 
-ytest.balanced100k.pca <- ifelse(test.balanced100k.pca$y == "Default", 0, 1)
+ytest.pca = test.balanced.pca$y
 
-InformationValue::confusionMatrix(ytest.balanced100k.pca, yhat.balanced100k.pca)
+InformationValue::confusionMatrix(ytest.pca, yhat.pca)
 ```
 
 ```{r}
-InformationValue::plotROC(ytest.balanced100k.pca, yhat.balanced100k.pca)
+InformationValue::plotROC(ytest.pca, yhat.pca)
 ```
 
 
 ## Best Subset Selection (BSS)
 ```{r}
-acc.balanced10k = acc %>% group_by(y) %>% sample_n(1e4) %>% ungroup()
-
-train.balanced10k = sample_frac(acc.balanced10k, 0.8)
-test.balanced10k.pca <- anti_join(acc.balanced10k,train.balanced10k)
-
-fit.balanced10k.bss = regsubsets(y ~ ., train.balanced10k)
+fit.bss = regsubsets(y ~ ., train.balanced, really.big=T)
 ```
 
 
