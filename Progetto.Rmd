@@ -81,14 +81,9 @@ acc <- acc[!apply(acc, 1, function(x) any(x=="")),]
 fwrite(acc, "archive/accepted_clean.csv", sep = ",")
 ```
 
+# Data Preparation
 ```{r}
 acc <- fread("archive/accepted_clean.csv", sep=",",header=T)
-```
-
-# Data Preparation
-
-
-```{r}
 acc <- as.data.frame(acc)
 numeric_variables <- c(
   "annual_inc",
@@ -131,13 +126,15 @@ acc <- acc %>%
       emp_length < 10 ~ "mid",
       T ~"high")) %>%
   select(-earliest_cr_line)
-```
-
-```{r}
 acc_with_current <- acc
 acc <- acc %>% 
-  mutate(y=ifelse(loan_status == "Charged Off", "Default", loan_status)) %>%
-  filter(loan_status %notin% c("Current", "In Grace Period", "Late (16-30 days)", "Late (31-120 days)"))
+  filter(loan_status %notin% c("Current", "In Grace Period", "Late (16-30 days)")) %>%
+  mutate(y=case_when(
+    loan_status == "Late (31-120 days)" ~ 0,
+    loan_status == "Charged Off" ~ 0,
+    loan_status == "Default" ~ 0,
+    loan_status == "Fully Paid" ~ 1
+  ))
 ```
 
 Possiamo pensare di utilizzare anche i Current tipo con 90% già ripagato. Ma ci servono? No!
@@ -285,7 +282,7 @@ train.balanced100k <- sample_frac(acc.balanced100k, 0.8)
 test.balanced100k <- anti_join(acc.balanced100k,train.balanced100k)
 
 
-fit.balanced100k <- glm(y~., train.balanced100k %>% select(-loan_status, -addr_state, -grade, -sub_grade, -emp_title) %>% mutate(y=ifelse(y=="Default",0,1)), family="binomial")
+fit.balanced100k <- glm(y~., train.balanced100k %>% select(-loan_status, -addr_state, -grade, -sub_grade, -emp_title), family="binomial")
 
 yhat.balanced100k <- predict(fit.balanced100k, test.balanced100k %>% select(-loan_status, -addr_state, -grade, -sub_grade, -emp_title))
 
@@ -316,11 +313,11 @@ acc.balanced100k.pca <- acc_pca %>% group_by(y) %>% sample_n(1e5) %>% ungroup()
 train.balanced100k.pca <- sample_frac(acc.balanced100k.pca, 0.8)
 test.balanced100k.pca <- anti_join(acc.balanced100k.pca,train.balanced100k.pca)
 
-fit.balanced100k.pca <- glm(y~., train.balanced100k.pca %>% mutate(y=ifelse(y=="Default",0,1)), family="binomial")
+fit.balanced100k.pca <- glm(y~., train.balanced100k.pca, family="binomial")
 
 yhat.balanced100k.pca <- predict(fit.balanced100k.pca, test.balanced100k.pca)
 
-ytest.balanced100k.pca <- ifelse(test.balanced100k.pca$y == "Default", 0, 1)
+ytest.balanced100k.pca <- ifelse(test.balanced100k.pca$y == 0, 0, 1)
 
 InformationValue::confusionMatrix(ytest.balanced100k.pca, yhat.balanced100k.pca)
 ```
