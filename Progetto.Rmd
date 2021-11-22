@@ -16,7 +16,7 @@ library(stringr)
 library(sampling)
 library(leaps)
 #library(bestglm)
-library(future.apply)
+library(factoextra)
 `%notin%` <- Negate(`%in%`)
 ```
 
@@ -163,7 +163,7 @@ acc <- acc %>%
     sub_grade=as.factor(sub_grade),
     term=as.factor(term),
     verification_status=as.factor(verification_status),
-  ) 
+  ) %>% select(-loan_status)
 ```
 
 Possiamo pensare di utilizzare anche i Current tipo con 90% già ripagato. Ma ci servono? No!
@@ -318,64 +318,61 @@ corrplot(cor(acc[, new_numeric_variables]))
 # Modeling
 
 ```{r}
-acc.balanced1k <- acc %>% group_by(y) %>% sample_n(1e3) %>% ungroup()
+set.seed(1000)
+acc.balanced <- acc %>% group_by(y) %>% sample_n(min(summary(acc$y))) %>% ungroup()
 
-train.balanced1k <- sample_frac(acc.balanced1k, 0.8)
-test.balanced1k <- anti_join(acc.balanced1k,train.balanced1k)
+train.balanced = sample_frac(acc.balanced, 0.8)
+test.balanced = anti_join(acc.balanced,train.balanced)
+ystar = test.balanced$y
 
-fit.balanced1k <- glm(y~., train.balanced1k %>% select(-), family="binomial")
+```
 
-yhat.balanced1k <- predict(fit.balanced1k, test.balanced1k)
 
-ytest.balanced1k <- test.balanced1k$y
+```{r}
+fit.glm <- glm(y~., train.balanced, family="binomial")
 
-InformationValue::confusionMatrix(ytest.balanced1k, yhat.balanced1k)
+yhat.glm <- predict(fit.glm, test.balanced)
+
+InformationValue::confusionMatrix(ystar, yhat.glm-1)
 ```
 
 
 ```{r}
 #PCA
-library(factoextra)
-
 pca.res <- prcomp(scale(as.matrix(acc[,new_numeric_variables])))
 fviz_eig(pca.res)
 
 print(pca.res$sdev)
 
-acc_pca <- as.data.frame(scale(as.matrix(acc[,new_numeric_variables])) %*% pca.res$rotation)[,1:8]
+acc_pca <- as.data.frame(scale(as.matrix(acc[,new_numeric_variables])) %*% pca.res$rotation)[,1:8] # prime otto variabili
 #acc_pca <- acc_pca %>% cbind(acc %>% select(-new_numeric_variables))
 acc_pca <- acc_pca %>% cbind(acc%>%select(y))
 ```
 
 
 ```{r}
-acc.balanced100k.pca <- acc_pca %>% group_by(y) %>% sample_n(1e5) %>% ungroup()
+acc.balanced.pca <- acc_pca %>% group_by(y) %>% sample_n(min(summary(acc_pca$y))) %>% ungroup()
 
-train.balanced100k.pca <- sample_frac(acc.balanced100k.pca, 0.8)
-test.balanced100k.pca <- anti_join(acc.balanced100k.pca,train.balanced100k.pca)
+train.balanced.pca <- sample_frac(acc.balanced.pca, 0.8)
+test.balanced.pca <- anti_join(acc.balanced.pca,train.balanced.pca)
 
-fit.balanced100k.pca <- glm(y~., train.balanced100k.pca, family="binomial")
+fit.pca <- glm(y~., train.balanced.pca, family="binomial")
 
-yhat.balanced100k.pca <- predict(fit.balanced100k.pca, test.balanced100k.pca)
+yhat.pca <- predict(fit.pca, test.balanced.pca)
 
-ytest.balanced100k.pca <- ifelse(test.balanced100k.pca$y == 0, 0, 1)
+ytest.pca = test.balanced.pca$y
 
-InformationValue::confusionMatrix(ytest.balanced100k.pca, yhat.balanced100k.pca)
+InformationValue::confusionMatrix(ytest.pca, yhat.pca)
 ```
 
 ```{r}
-InformationValue::plotROC(ytest.balanced100k.pca, yhat.balanced100k.pca)
+InformationValue::plotROC(ytest.pca, yhat.pca)
 ```
 
 
 ## Best Subset Selection (BSS)
 ```{r}
-acc.balanced10k = acc %>% group_by(y) %>% sample_n(1e4) %>% ungroup()
-
-train.balanced10k = sample_frac(acc.balanced10k, 0.8)
-test.balanced10k.pca <- anti_join(acc.balanced10k,train.balanced10k)
-
-fit.balanced10k.bss = regsubsets(y ~ ., train.balanced10k)
+fit.bss = regsubsets(y ~ ., train.balanced, really.big=T)
 ```
 
 
