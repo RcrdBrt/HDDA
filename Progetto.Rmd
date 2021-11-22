@@ -74,7 +74,7 @@ variables <- c(
 ```{r}
 acc <- acc[,..variables]
 acc <- acc[complete.cases(acc),]
-acc <- acc[!future_apply(acc, 1, function(x) any(x=="")),]
+acc <- acc[!apply(acc, 1, function(x) any(x=="")),]
 ```
 
 ```{r}
@@ -248,7 +248,7 @@ new_numeric_variables <- c(
   "mo_sin_earliest_cr_line",
   "fico_mean",
   "int_rate",
-  "issue_d",
+  #"issue_d",
   "loan_amnt",
   "mo_sin_old_il_acct",
   "mo_sin_old_rev_tl_op",
@@ -332,10 +332,10 @@ InformationValue::plotROC(ytest.balanced100k.pca, yhat.balanced100k.pca)
 
 ## Best Subset Selection (BSS)
 ```{r}
-acc.balanced10k = acc.balanced100k %>%group_by(y) %>% sample_n(1e4) %>% ungroup()
+acc.balanced10k = acc %>% group_by(y) %>% sample_n(1e4) %>% ungroup()
 
 train.balanced10k = sample_frac(acc.balanced10k, 0.8)
-test.balanced10k.pca <- anti_join(acc.balanced10k,train)
+test.balanced10k.pca <- anti_join(acc.balanced10k,train.balanced10k)
 
 fit.balanced10k.bss = regsubsets(y ~ ., train.balanced10k)
 ```
