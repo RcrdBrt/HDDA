@@ -55,4 +55,7 @@ plotly::plot_ly(month_summary_full, x = ~issue_d) %>%
   plotly::add_trace(y = ~n_current, mode = "lines+markers", name = "No Missing Values", opacity = 0.5) %>%
   plotly::add_trace(y = ~n, mode = "lines+markers", name = "No Missing Values and No Current", opacity = 1) %>%
   plotly::layout(title = "Crescita di LendingClub",  xaxis = list(title = 'Data'),
-                 yaxis = list(title = 'Numero prestiti finanziati'))
+                 yaxis = list(title = 'Numero prestiti finanziati'),
+                 legend = list(x=0.1,y=0.9))
+
+rm(acc_full)
