@@ -63,11 +63,12 @@ make_violin <- function(data=acc, variables, title="Distribuzioni"){
     facet_wrap(~variable, scales = "free", strip.position="bottom") +
     ggtitle(title) +
     theme_minimal() + 
-    theme(plot.title = element_text(hjust = 0.5, size=16, face="bold"),
+    theme(plot.title = element_text(hjust = 0.5, size=32, face="bold"),
           axis.title = element_blank(),
+          axis.text=element_text(size=20),
           axis.text.x = element_blank(),
           legend.position = "none", 
-          strip.text = element_text(size=8,face="bold"))
+          strip.text = element_text(size=20,face="bold"))
 }
 
 make_barplot <- function(data=acc, variables, title="Distribuzioni"){
@@ -79,20 +80,24 @@ make_barplot <- function(data=acc, variables, title="Distribuzioni"){
       scale_y_continuous(labels = scales::percent) +
       ggtitle(variables[i]) +
       theme_minimal() + 
-      theme(plot.title = element_text(hjust = 0.5, size=8, face="bold"),
-            axis.text=element_text(size=8),
-            axis.title=element_text(size=8,face="bold"),
+      theme(plot.title = element_text(hjust = 0.5, size=20, face="bold"),
+            axis.text=element_text(size=20),
+            axis.title=element_text(size=20,face="bold"),
             axis.title.x=element_blank(),
             axis.text.x=element_blank(),
             axis.ticks.x=element_blank(),
             legend.position = "bottom", 
             legend.title = element_blank(),
             legend.box="vertical",
-            legend.text = element_text(size=6)) +
+            legend.text = element_text(size=18)) +
       guides(fill=guide_legend(nrow=2,byrow=TRUE))
   }
   p[[1]] <- p[[1]] + ylab("Percentuale osservazioni")
-  (p[[1]] | p[[2]] | p[[3]])
+  if (length(p) == 2){
+    (p[[1]] | p[[2]])
+  } else{
+    (p[[1]] | p[[2]] | p[[3]])
+  }
 }
 
 make_violin(small_acc,numeric_variables[1:6], title="Distribuzioni")
@@ -101,8 +106,8 @@ make_violin(small_acc,numeric_variables[13:18], title="")
 make_violin(small_acc,numeric_variables[19:24], title="")
 make_violin(small_acc,numeric_variables[25], title="")
 
-make_barplot(small_acc, c("application_type", "emp_length", "emp_title"))
-make_barplot(small_acc, c("grade", "home_ownership", "initial_list_status"))
-make_barplot(small_acc, c("purpose", "term", "verification_status"))
+make_barplot(small_acc, c("application_type", "emp_length","grade"))
+make_barplot(small_acc, c("home_ownership", "initial_list_status", "purpose"))
+make_barplot(small_acc, c("term", "verification_status"))
 
 

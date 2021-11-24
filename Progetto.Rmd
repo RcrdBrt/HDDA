@@ -34,7 +34,7 @@ variables <- c(
   "delinq_2yrs",
   "earliest_cr_line",
   "emp_length",
-  #"emp_title", # troppi livelli
+  #"emp_title", # troppi livelli, circa 600k
   "fico_range_high",
   "fico_range_low",
   "grade",
@@ -182,7 +182,7 @@ source("data_preparation/outliers.R", print.eval = T)
 
 ### numero di osservazioni / tempo
 
-```{r}
+```{r, fig.width=10, fig.height=6}
 source("data_preparation/plot_osservazioni_e_tempo.R", print.eval = T)
 ```
 
@@ -201,7 +201,7 @@ source("data_preparation/ROI_violin.R", print.eval = T)
 
 ### Violin plot for each numeric variable and barplot for categorical variables
 
-```{r}
+```{r, fig.width=10, fig.height=6}
 source("data_preparation/all_violin.R", print.eval = T)
 ```
 
@@ -371,6 +371,7 @@ InformationValue::plotROC(ytest.pca, yhat.pca)
 
 
 ## Best Subset Selection (BSS)
+
 ```{r}
 fit.bss = regsubsets(y ~ ., train.balanced, really.big=T)
 ```
