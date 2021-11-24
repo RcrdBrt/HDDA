@@ -374,6 +374,40 @@ InformationValue::plotROC(ytest.pca, yhat.pca)
 
 ```{r}
 fit.bss = regsubsets(y ~ ., train.balanced, really.big=T)
+
+summary.bests <- summary(fit.bss)   #PER OTTENERE I RISULTATI
+
+head(summary.bests$outmat, 10) #PER VEDERE SOLO UNA PARTE
+
+plot(summary.bests$cp, xlab = "k", ylab = "Cp", type = "b")
+
+plot(fit.bss, scale = "bic")
+
+# function predict for regsubsets
+
+predict.regsubsets <- function(object, newdata, id, ...) {
+form = as.formula(object$call[[2]])
+mat = model.matrix(form, newdata)
+coefi = coef(object, id = id)
+xvars = names(coefi)
+mat[, xvars] %*% coefi
+}
+
+#INDICE CP
+
+yhat.bestCp <- predict.regsubsets(fit.bss, newdata = test,
+id = which.min(summary.bests$cp))
+
+RMSE.Cp <- sqrt(mean((yhat.bestCp - y.star)^2))
+RMSE.Cp
+
+#INDICE BIC
+
+yhat.bestBIC <- predict.regsubsets(fit.bests, newdata = test,
+id = which.min(summary.bests$bic))
+
+RMSE.BIC <- sqrt(mean((yhat.bestBIC - y.star)^2))
+RMSE.BIC
 ```
 
 
