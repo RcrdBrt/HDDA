@@ -275,7 +275,7 @@ acc <- acc %>%
 acc <- acc %>% 
   mutate(num_not_sats = open_acc - num_sats,
          num_bc_not_sats = num_bc_tl - num_bc_sats) %>%
-  select(-num_sats, num_bc_sats)
+  select(-num_sats, num_bc_sats) %>% mutate(y=as.numeric(as.character(y)))
 ```
 
 
@@ -318,11 +318,31 @@ corrplot(cor(acc[, new_numeric_variables]))
 # Modeling
 
 ```{r}
+model_variables = names(acc)[names(acc) %notin% c(
+  "grade",
+  "funded_amnt",
+  "issue_d",
+  "num_sats",
+  "num_bc_sats",
+  "subgrade",
+  "pub_rec_bankruptcies",
+  "num_rev_accts",
+  "mo_sin_old_rev_tl_op"
+)]
+
+model_acc = acc[,model_variables] %>% relocate(y, .after = last_col())
+
+corrplot(cor(model_acc[, new_numeric_variables[new_numeric_variables %in% model_variables]]))
+```
+
+
+```{r}
 set.seed(1000)
-acc.balanced <- acc %>% group_by(y) %>% sample_n(min(summary(acc$y))) %>% ungroup()
+acc.balanced <- model_acc %>% group_by(y) %>% sample_n(min(summary(acc$y))) %>% ungroup()
 
 train.balanced = sample_frac(acc.balanced, 0.8)
 test.balanced = anti_join(acc.balanced,train.balanced)
+
 ```
 
 
@@ -371,7 +391,11 @@ InformationValue::plotROC(ytest.pca, yhat.pca)
 ## Best Subset Selection (BSS)
 
 ```{r}
-fit.bss = bestglm(train.balanced[,new_numeric_variables][,c(1:4)] %>% cbind(train.balanced$y), family=binomial, IC="BIC", method="forward")
+fit.bss = bestglm(train.balanced %>% select(-y) %>% cbind(train.balanced$y), family=binomial, IC="BIC")
+
+yhat = predict(fit.bss$BestModel, test.balanced %>% select(-y))
+
+InformationValue::plotROC(test.balanced$y, yhat)
 ```
 
 # Tuning
