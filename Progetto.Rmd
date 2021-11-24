@@ -275,7 +275,7 @@ acc <- acc %>%
 acc <- acc %>% 
   mutate(num_not_sats = open_acc - num_sats,
          num_bc_not_sats = num_bc_tl - num_bc_sats) %>%
-  select(-num_sats, num_bc_sats) %>% mutate(y=as.numeric(as.character(y)))
+  select(-num_sats, num_bc_sats)
 ```
 
 
@@ -349,9 +349,13 @@ test.balanced = anti_join(acc.balanced,train.balanced)
 ```{r}
 fit.glm <- glm(y~., train.balanced, family="binomial")
 
-yhat.glm <- predict(fit.glm, test.balanced)
+yhat.glm <- predict(fit.glm, test.balanced)-1
 
-InformationValue::confusionMatrix(test.balanced$y, yhat.glm-1)
+InformationValue::confusionMatrix(test.balanced$y, yhat.glm)
+```
+
+```{r}
+InformationValue::plotROC(test.balanced$y, yhat.glm)
 ```
 
 
@@ -391,7 +395,7 @@ InformationValue::plotROC(ytest.pca, yhat.pca)
 ## Best Subset Selection (BSS)
 
 ```{r}
-fit.bss = bestglm(train.balanced %>% select(-y) %>% cbind(train.balanced$y), family=binomial, IC="BIC")
+fit.bss = bestglm(train.balanced %>% mutate(y=as.numeric(as.character(y))) %>% as.data.frame(), family=binomial, IC="BIC", method="forward")
 
 yhat = predict(fit.bss$BestModel, test.balanced %>% select(-y))
 
