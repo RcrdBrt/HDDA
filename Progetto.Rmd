@@ -17,6 +17,8 @@ library(sampling)
 library(leaps)
 library(bestglm)
 library(factoextra)
+library(glmnet)
+library(caret)
 `%notin%` <- Negate(`%in%`)
 ```
 
@@ -142,7 +144,7 @@ acc <- acc %>%
     addr_state %in% c("ND", "SD", "NE", "KS", "MN", "IA", "MO", "WI", "IL", "IN", "MI", "OH") ~ "Midwest",
     addr_state %in% c("AR", "LA", "MS", "KY", "TN", "AL", "GA", "FL", "NC", "SC", "VA", "WV") ~ "South East",
     addr_state %in% c("ME", "VT", "NH", "MA", "RI", "CT") ~ "New England",
-    addr_state %in% c("NY", "PA", "NJ", "MD", "DE") ~ "Mid Atlantic",
+    addr_state %in% c("NY", "PA", "NJ", "MD", "DE", "DC") ~ "Mid Atlantic",
   )) %>%
   # livelli erano molto sbilanciati, optato per 3 livelli
   mutate(purpose=case_when(
@@ -158,7 +160,6 @@ acc <- acc %>%
     grade=as.factor(grade),
     home_ownership=as.factor(home_ownership),
     initial_list_status=as.factor(initial_list_status),
-    loan_status=as.factor(loan_status),
     purpose=as.factor(purpose),
     sub_grade=as.factor(sub_grade),
     term=as.factor(term),
@@ -169,10 +170,7 @@ acc <- acc %>%
 Possiamo pensare di utilizzare anche i Current tipo con 90% già ripagato. Ma ci servono? No!
 
 ```{r}
-describe(acc$loan_status)
-```
-
-```{r}
+set.seed(1000)
 source("data_preparation/outliers.R", print.eval = T)
 ```
 
@@ -324,7 +322,7 @@ model_variables = names(acc)[names(acc) %notin% c(
   "issue_d",
   "num_sats",
   "num_bc_sats",
-  "subgrade",
+  "sub_grade",
   "pub_rec_bankruptcies",
   "num_rev_accts",
   "mo_sin_old_rev_tl_op"
@@ -347,6 +345,7 @@ test.balanced = anti_join(acc.balanced,train.balanced)
 
 
 ```{r}
+set.seed(1000)
 fit.glm <- glm(y~., train.balanced, family="binomial")
 
 yhat.glm <- predict(fit.glm, test.balanced)-1
@@ -361,6 +360,7 @@ InformationValue::plotROC(test.balanced$y, yhat.glm)
 
 ```{r}
 #PCA
+set.seed(1000)
 pca.res <- prcomp(scale(as.matrix(acc[,new_numeric_variables])))
 fviz_eig(pca.res)
 
@@ -373,6 +373,7 @@ acc_pca <- acc_pca %>% cbind(acc%>%select(y))
 
 
 ```{r}
+set.seed(1000)
 acc.balanced.pca <- acc_pca %>% group_by(y) %>% sample_n(min(summary(acc_pca$y))) %>% ungroup()
 
 train.balanced.pca <- sample_frac(acc.balanced.pca, 0.8)
@@ -395,12 +396,47 @@ InformationValue::plotROC(ytest.pca, yhat.pca)
 ## Best Subset Selection (BSS)
 
 ```{r}
-fit.bss = bestglm(train.balanced %>% mutate(y=as.numeric(as.character(y))) %>% as.data.frame(), family=binomial, IC="BIC", method="forward")
+set.seed(1000)
+fit.bss = step(fit.glm, direction = "backward", trace=T)
 
-yhat = predict(fit.bss$BestModel, test.balanced %>% select(-y))
+yhat.bss = predict(fit.bss, test.balanced %>% select(-y))
 
-InformationValue::plotROC(test.balanced$y, yhat)
+InformationValue::plotROC(test.balanced$y, yhat.bss)
 ```
+
+# Ridge
+
+```{r}
+set.seed(1000)
+Xlm <- model.matrix(fit.glm)[,-1]
+fit.ridge <- glmnet(Xlm, train.balanced$y, alpha = 0, family="binomial")    # alpha=0: ridge
+
+summary(fit.ridge)
+```
+
+```{r}
+plot(fit.ridge, xvar="lambda")
+abline(h=0)
+```
+
+```{r}
+
+K <- 10
+cv.fit <- cv.glmnet(Xlm, train.balanced$y, alpha=0, nfolds = K, grouped = FALSE, family="binomial", type.measure = "auc")
+plot(cv.fit)
+abline(v=log(cv.fit$lambda.min))
+```
+
+
+# Caret
+```{r}
+set.seet(1000)
+
+fit.rf.control = trainControl(method="repeatedcv", number=10, repeats=10)
+fit.rf = train(y ~ ., data=train.balanced, method="ordinalRF", trControl=fit.rf.control)
+
+```
+
 
 # Tuning
 
