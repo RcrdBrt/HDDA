@@ -19,6 +19,11 @@ library(bestglm)
 library(factoextra)
 library(glmnet)
 library(caret)
+library(ranger)
+library(ordinalForest)
+library(InformationValue)
+library(kernlab)
+library(e1071)
 `%notin%` <- Negate(`%in%`)
 ```
 
@@ -274,10 +279,7 @@ acc <- acc %>%
   mutate(num_not_sats = open_acc - num_sats,
          num_bc_not_sats = num_bc_tl - num_bc_sats) %>%
   select(-num_sats, num_bc_sats)
-```
 
-
-```{r}
 # tolte le correlazioni, restano queste variabili esplicative numeriche
 new_numeric_variables <- c(
   "annual_inc",
@@ -306,12 +308,9 @@ new_numeric_variables <- c(
   "tax_liens",
   "total_acc"
 )
-```
-
-
-```{r}
 corrplot(cor(acc[, new_numeric_variables]))
 ```
+
 
 # Modeling
 
@@ -350,11 +349,11 @@ fit.glm <- glm(y~., train.balanced, family="binomial")
 
 yhat.glm <- predict(fit.glm, test.balanced)-1
 
-InformationValue::confusionMatrix(test.balanced$y, yhat.glm)
+confusionMatrix(test.balanced$y, yhat.glm)
 ```
 
 ```{r}
-InformationValue::plotROC(test.balanced$y, yhat.glm)
+plotROC(test.balanced$y, yhat.glm)
 ```
 
 
@@ -385,11 +384,11 @@ yhat.pca <- predict(fit.pca, test.balanced.pca)
 
 ytest.pca = test.balanced.pca$y
 
-InformationValue::confusionMatrix(ytest.pca, yhat.pca)
+confusionMatrix(ytest.pca, yhat.pca)
 ```
 
 ```{r}
-InformationValue::plotROC(ytest.pca, yhat.pca)
+plotROC(ytest.pca, yhat.pca)
 ```
 
 
@@ -401,7 +400,7 @@ fit.bss = step(fit.glm, direction = "backward", trace=T)
 
 yhat.bss = predict(fit.bss, test.balanced %>% select(-y))
 
-InformationValue::plotROC(test.balanced$y, yhat.bss)
+plotROC(test.balanced$y, yhat.bss)
 ```
 
 # Ridge
@@ -430,10 +429,15 @@ abline(v=log(cv.fit$lambda.min))
 
 # Caret
 ```{r}
-set.seet(1000)
+set.seed(1000)
 
-fit.rf.control = trainControl(method="repeatedcv", number=10, repeats=10)
-fit.rf = train(y ~ ., data=train.balanced, method="ordinalRF", trControl=fit.rf.control)
+fit.svm = train(
+  y ~ .,
+  data=train.balanced,
+  method="svmLinear2",
+  trControl=trainControl(method="repeatedcv", number=10, repeats=20),
+  tuneGrid=expand.grid(cost=3^(-7:7))
+)
 
 ```
 
