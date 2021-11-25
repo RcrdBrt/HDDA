@@ -170,16 +170,11 @@ acc <- acc %>%
     term=as.factor(term),
     verification_status=as.factor(verification_status),
   ) %>% select(-loan_status)
-```
-
-Possiamo pensare di utilizzare anche i Current tipo con 90% già ripagato. Ma ci servono? No!
-
-```{r}
 set.seed(1000)
 source("data_preparation/outliers.R", print.eval = T)
 ```
 
-
+Possiamo pensare di utilizzare anche i Current tipo con 90% già ripagato. Ma ci servono? No!
 
 # Data Exploration
 
@@ -425,6 +420,25 @@ cv.fit <- cv.glmnet(Xlm, train.balanced$y, alpha=0, nfolds = K, grouped = FALSE,
 plot(cv.fit)
 abline(v=log(cv.fit$lambda.min))
 ```
+
+# Lasso
+```{r}
+K <- 10
+cv.fit.lasso <- cv.glmnet(Xlm,y,alpha=1, nfolds = K, grouped = FALSE, family="binomial", type.measure="auc" ,parallel=TRUE)
+plot(cv.fit.lasso)
+abline(v=log(cv.fit.lasso$lambda.min))
+coef(cv.fit.lasso)
+```
+
+```{r}
+yhat.lasso <- predict(cv.fit.lasso, newx = model.matrix(lm(y~., test.balanced))[,-1], s = "lambda.min")
+InformationValue::plotROC(test.balanced$y, yhat.lasso)
+confusionMatrix(
+  test.balanced$y,
+  yhat.lasso,
+  threshold = InformationValue::optimalCutoff(test.balanced$y, yhat.lasso, optimiseFor = "misclasserror"))
+```
+
 
 
 # Caret
