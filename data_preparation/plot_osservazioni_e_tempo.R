@@ -27,8 +27,6 @@ plot( month_summary_current,
 
 ###############################################################################
 
-acc_full <- fread("./archive/accepted_2007_to_2018Q4.csv", sep = ",", header = T)
-
 month_summary_full <- 
   acc_full %>% 
   mutate(issue_d = lubridate::my(issue_d)) %>%

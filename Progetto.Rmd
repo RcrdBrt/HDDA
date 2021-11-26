@@ -30,7 +30,7 @@ library(e1071)
 # Data Ingestion
 
 ```{r message=FALSE, warning=FALSE, cache=TRUE, paged.print=FALSE}
-acc <- fread("archive/accepted_2007_to_2018Q4.csv", sep = ",", header = T)
+acc_full <- fread("archive/accepted_2007_to_2018Q4.csv", sep = ",", header = T)
 ```
 
 ```{r, cache=TRUE}
@@ -49,6 +49,7 @@ variables <- c(
   "initial_list_status",
   "int_rate",
   "issue_d",
+  "last_pymnt_d",
   "loan_amnt",
   "funded_amnt",
   "loan_status",
@@ -79,6 +80,7 @@ variables <- c(
 ```
 
 ```{r}
+acc <- acc_full
 acc <- acc[,..variables]
 acc <- acc[complete.cases(acc),]
 acc <- acc[!apply(acc, 1, function(x) any(x=="")),]
@@ -125,6 +127,7 @@ acc <- acc %>%
   mutate(
     mo_sin_earliest_cr_line=as.integer(round((as.Date("2018-12-01")-lubridate::my(earliest_cr_line))/(365.25/12))),
     issue_d = lubridate::my(issue_d),
+    last_pymnt_d = lubridate::my(last_pymnt_d),
     emp_length=as.numeric(str_extract(emp_length, "[0-9]+"))
   ) %>%
   mutate(
@@ -133,7 +136,9 @@ acc <- acc %>%
       emp_length < 10 ~ "mid",
       T ~"high")) %>%
   select(-earliest_cr_line)
+
 acc_with_current <- acc
+
 acc <- acc %>% 
   filter(loan_status %notin% c("Current", "In Grace Period", "Late (16-30 days)")) %>%
   mutate(y=case_when(
@@ -188,6 +193,7 @@ source("data_preparation/plot_osservazioni_e_tempo.R", print.eval = T)
 
 ```{r}
 source("data_preparation/pie_chart_default_VS_fully_paid.R", print.eval = T)
+piechart(acc,group="y")
 ```
 
 ### ROI boxplot/violinplot (for each grade?)
@@ -269,7 +275,6 @@ acc <- acc %>%
     fico_mean > 800 ~ "Exceptional"
   )) %>% select(-fico_mean) %>% mutate(fico_class=as.factor(fico_class))
 
-
 acc <- acc %>% 
   mutate(num_not_sats = open_acc - num_sats,
          num_bc_not_sats = num_bc_tl - num_bc_sats) %>%
@@ -280,9 +285,7 @@ new_numeric_variables <- c(
   "annual_inc",
   "delinq_2yrs",
   "mo_sin_earliest_cr_line",
-  #"fico_mean",
   "int_rate",
-  #"issue_d",
   "loan_amnt",
   "mo_sin_old_il_acct",
   "mo_sin_old_rev_tl_op",
@@ -314,6 +317,7 @@ model_variables = names(acc)[names(acc) %notin% c(
   "grade",
   "funded_amnt",
   "issue_d",
+  "last_pymnt_d",
   "num_sats",
   "num_bc_sats",
   "sub_grade",
@@ -398,7 +402,7 @@ yhat.bss = predict(fit.bss, test.balanced %>% select(-y))
 plotROC(test.balanced$y, yhat.bss)
 ```
 
-# Ridge
+## Ridge
 
 ```{r}
 set.seed(1000)
@@ -421,7 +425,7 @@ plot(cv.fit)
 abline(v=log(cv.fit$lambda.min))
 ```
 
-# Lasso
+## Lasso
 ```{r}
 K <- 10
 cv.fit.lasso <- cv.glmnet(Xlm,y,alpha=1, nfolds = K, grouped = FALSE, family="binomial", type.measure="auc" ,parallel=TRUE)
@@ -441,7 +445,8 @@ confusionMatrix(
 
 
 
-# Caret
+## Caret
+
 ```{r}
 set.seed(1000)
 
@@ -452,6 +457,34 @@ fit.svm = train(
   trControl=trainControl(method="repeatedcv", number=10, repeats=20),
   tuneGrid=expand.grid(cost=3^(-7:7))
 )
+
+```
+
+
+# Survival Analysis
+
+In order to perform survival analysis we define three possible outcomes for a lending: "Fully Paid", "Default" and "Pre-Paid", whose meanings are pretty clear.
+
+To distinguish between Regalur Payment and Early Payment we define a tolerance of -1 month since our dates are all represented as month-year.
+
+
+```{r}
+acc_surv <- acc
+
+acc_surv <- acc_surv %>% 
+  mutate(term=as.numeric(substring(as.character(term),0,2))) %>%
+  mutate(actual_duration_to_term = as.numeric(last_pymnt_d - issue_d) / (term*30)) %>%
+  mutate(y = as.factor(case_when(
+      y == 0 ~ 0, ### Deafult
+      (y == 1) & (actual_duration_to_term < 0.8) ~ 2, ### Early Payment
+      T ~ 1 ### Regular Payment
+    ))
+  )
+
+piechart(acc_surv, "y")
+
+hist(as.numeric(acc_surv[acc_surv$y==1, "actual_duration_to_term"]), col = "blue")
+hist(as.numeric(acc_surv[acc_surv$y==0, "actual_duration_to_term"]), col="red",add =T)
 
 ```
 
