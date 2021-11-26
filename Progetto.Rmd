@@ -417,12 +417,15 @@ plot(fit.ridge, xvar="lambda")
 abline(h=0)
 ```
 
+
+
+
 ```{r}
 set.seed(1000)
 K <- 10
-cv.fit <- cv.glmnet(Xlm, train.balanced$y, alpha=0, nfolds = K, grouped = FALSE, family="binomial", type.measure = "auc")
-plot(cv.fit)
-abline(v=log(cv.fit$lambda.min))
+fit.ridge.cv <- cv.glmnet(Xlm, train.balanced$y, alpha=0, nfolds = K, grouped = FALSE, family="binomial", type.measure = "auc")
+plot(fit.ridge.cv)
+abline(v=log(fit.ridge.cv$lambda.min))
 ```
 
 ## Lasso
