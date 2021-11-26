@@ -418,7 +418,7 @@ abline(h=0)
 ```
 
 ```{r}
-
+set.seed(1000)
 K <- 10
 cv.fit <- cv.glmnet(Xlm, train.balanced$y, alpha=0, nfolds = K, grouped = FALSE, family="binomial", type.measure = "auc")
 plot(cv.fit)
@@ -427,6 +427,7 @@ abline(v=log(cv.fit$lambda.min))
 
 ## Lasso
 ```{r}
+set.seed(1000)
 K <- 10
 cv.fit.lasso <- cv.glmnet(Xlm,y,alpha=1, nfolds = K, grouped = FALSE, family="binomial", type.measure="auc" ,parallel=TRUE)
 plot(cv.fit.lasso)
@@ -435,6 +436,7 @@ coef(cv.fit.lasso)
 ```
 
 ```{r}
+set.seed(1000)
 yhat.lasso <- predict(cv.fit.lasso, newx = model.matrix(lm(y~., test.balanced))[,-1], s = "lambda.min")
 plotROC(test.balanced$y, yhat.lasso)
 confusionMatrix(
