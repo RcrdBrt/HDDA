@@ -7,23 +7,25 @@ output: html_notebook
 # Libraries
 
 ```{r message=FALSE, warning=FALSE, paged.print=FALSE}
-library(data.table)
-library(Hmisc)
-library(dplyr)
-library(corrplot)
-library(lubridate)
-library(stringr)
-library(sampling)
-library(leaps)
-library(bestglm)
-library(factoextra)
-library(glmnet)
-library(caret)
-library(ranger)
-library(ordinalForest)
-library(InformationValue)
-library(kernlab)
-library(e1071)
+if(!require(data.table)) install.packages("data.table")
+if(!require(Hmisc)) install.packages("Hmisc")
+if(!require(dplyr)) install.packages("dplyr")
+if(!require(corrplot)) install.packages("corrplot")
+if(!require(lubridate)) install.packages("lubridate")
+if(!require(stringr)) install.packages("stringr")
+if(!require(sampling)) install.packages("sampling")
+if(!require(leaps)) install.packages("leaps")
+if(!require(bestglm)) install.packages("bestglm")
+if(!require(glmnet)) install.packages("glmnet")
+if(!require(factoextra)) install.packages("factoextra")
+if(!require(caret)) install.packages("caret")
+if(!require(ranger)) install.packages("ranger")
+if(!require(ordinalForest)) install.packages("ordinalForest")
+if(!require(InformationValue)) install.packages("InformationValue")
+if(!require(kernlab)) install.packages("kernlab")
+if(!require(e1071)) install.packages("e1071")
+if(!require(survival)) install.packages("survival")
+if(!require(survminer)) install_github("kassambara/survminer", build_vignettes = FALSE)
 `%notin%` <- Negate(`%in%`)
 ```
 
@@ -328,6 +330,8 @@ model_variables = names(acc)[names(acc) %notin% c(
 
 model_acc = acc[,model_variables] %>% relocate(y, .after = last_col())
 
+model_acc[, new_numeric_variables %in% model_variables] <- scale(model_acc[, new_numeric_variables[new_numeric_variables %in% model_variables]])
+
 corrplot(cor(model_acc[, new_numeric_variables[new_numeric_variables %in% model_variables]]))
 ```
 
@@ -406,18 +410,25 @@ plotROC(test.balanced$y, yhat.bss)
 
 ```{r}
 set.seed(1000)
+
 Xlm <- model.matrix(fit.glm)[,-1]
-fit.ridge <- glmnet(Xlm, train.balanced$y, alpha = 0, family="binomial")    # alpha=0: ridge
+fit.ridge <- glmnet(Xlm, train.balanced$y, alpha = 0, family="binomial", nlambda = 100)    # alpha=0: ridge
 
 summary(fit.ridge)
 ```
 
 ```{r}
 plot(fit.ridge, xvar="lambda")
-abline(h=0)
+```
+```{r}
+
 ```
 
 
+```{r}
+# ridge performance considerations
+
+```
 
 
 ```{r}
@@ -479,6 +490,10 @@ acc_surv <- acc
 acc_surv <- acc_surv %>% 
   mutate(term=as.numeric(substring(as.character(term),0,2))) %>%
   mutate(actual_duration_to_term = as.numeric(last_pymnt_d - issue_d) / (term*30)) %>%
+  mutate(actual_duration_to_term = as.numeric(last_pymnt_d - issue_d) / (term*30))
+hist(as.numeric(acc_surv[acc$y==1, "actual_duration_to_term"]), col = "blue")
+hist(as.numeric(acc_surv[acc$y==0, "actual_duration_to_term"]), col="red",add =T)
+acc_surv <- acc_surv %>%
   mutate(y = as.factor(case_when(
       y == 0 ~ 0, ### Deafult
       (y == 1) & (actual_duration_to_term < 0.8) ~ 2, ### Early Payment
@@ -488,8 +503,9 @@ acc_surv <- acc_surv %>%
 
 piechart(acc_surv, "y")
 
-hist(as.numeric(acc_surv[acc_surv$y==1, "actual_duration_to_term"]), col = "blue")
-hist(as.numeric(acc_surv[acc_surv$y==0, "actual_duration_to_term"]), col="red",add =T)
+fit <- survfit(Surv(actual_duration_to_term, y) ~ 1, data = acc_surv)
+plot(fit, col=c("black", "red"), ylab="Survival", xlab="time")
+summary(fit, times = 10)
 
 ```
 
