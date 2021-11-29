@@ -213,7 +213,8 @@ source("data_preparation/plot_osservazioni_e_tempo.R", print.eval = T)
 
 ```{r}
 source("data_preparation/pie_chart_default_VS_fully_paid.R", print.eval = T)
-piechart(acc,group="y")
+piechart(acc,group="y") +
+  scale_fill_manual(labels=c("Default", "Fully Paid"), values=c("darkred","darkgreen"))
 ```
 
 ### ROI boxplot/violinplot (for each grade?)
@@ -470,11 +471,11 @@ coef(fit.lasso.cv)
 ```{r}
 set.seed(1000)
 yhat.lasso.cv.1se <- predict(fit.lasso.cv, Xlm.test, s = "lambda.1se")
-plotROC(test.balanced$y, yhat.lasso.cv.1se)
 confusionMatrix(
   test.balanced$y,
   yhat.lasso,
   threshold = InformationValue::optimalCutoff(test.balanced$y, yhat.lasso, optimiseFor = "misclasserror"))
+plotROC(test.balanced$y, yhat.lasso.cv.1se)
 ```
 
 
