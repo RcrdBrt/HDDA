@@ -140,8 +140,7 @@ numeric_variables <- c(
   "revol_bal",
   "revol_util",
   "tax_liens",
-  "total_acc",
-  "last_pymnt_d"
+  "total_acc"
 )
 
 acc <- acc %>%
@@ -433,9 +432,6 @@ plotROC(test.balanced$y, yhat.bss)
 ```{r}
 set.seed(1000)
 
-lambda <- 10^seq(10, -2, length = 100)
-
-normali
 
 Xlm <- model.matrix(fit.glm)[,-1]
 fit.ridge <- glmnet(Xlm, train.balanced$y, alpha = 0, family="binomial", nlambda = 100)    # alpha=0: ridge
