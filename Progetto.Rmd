@@ -26,6 +26,7 @@ if(!require(kernlab)) install.packages("kernlab")
 if(!require(e1071)) install.packages("e1071")
 if(!require(survival)) install.packages("survival")
 if(!require(survminer)) install_github("kassambara/survminer", build_vignettes = FALSE)
+if(!require(riskRegression)) install.packages("riskRegression")
 library(data.table)
 library(Hmisc)
 library(dplyr)
@@ -43,7 +44,8 @@ library(randomForest)
 library(InformationValue) 
 library(kernlab) 
 library(e1071) 
-library(survival) 
+library(survival)
+library(riskRegression)
 `%notin%` <- Negate(`%in%`)
 ```
 
@@ -502,7 +504,12 @@ acc.balanced.tiny <- model_acc %>% group_by(y) %>% sample_n(10000) %>% ungroup()
 train.balanced.tiny = sample_frac(acc.balanced.tiny, 0.8)
 test.balanced.tiny = anti_join(acc.balanced.tiny, train.balanced.tiny)
 
-fit.rf = randomForest(y ~ ., train.balanced.tiny, mtry = sqrt(length(names(train.balanced.tiny))), ntree=200)
+fit.rf = randomForest(y ~ ., train.balanced.tiny, mtry = sqrt(length(names(train.balanced.tiny))), ntree=200, importance=T)
+
+varImpPlot(fit.rf, type=1)
+
+tuneRF(train.balanced.tiny %>% select(-y), train.balanced.tiny$y, ntreeTry = 100)
+
 plot(fit.rf)
 
 yhat.rf = predict(fit.rf, test.balanced.tiny %>% select(-y), type="prob", norm.votes=T)
@@ -521,24 +528,213 @@ To distinguish between Regalur Payment and Early Payment we define a tolerance o
 acc_surv <- acc
 acc_surv <- acc_surv %>% 
   mutate(term=as.numeric(substring(as.character(term),0,2))) %>%
-  mutate(actual_duration_to_term = as.numeric(last_pymnt_d - issue_d) / (term*30)) %>%
   mutate(actual_duration_to_term = as.numeric(last_pymnt_d - issue_d) / (term*30))
 hist(as.numeric(acc_surv[acc$y==1, "actual_duration_to_term"]), col = "blue")
 hist(as.numeric(acc_surv[acc$y==0, "actual_duration_to_term"]), col="red",add =T)
-acc_surv <- acc_surv %>%
+acc_surv_pie <- acc_surv %>%
   mutate(y = as.factor(case_when(
       y == 0 ~ 0, ### Deafult
       (y == 1) & (actual_duration_to_term < 0.8) ~ 2, ### Early Payment
       T ~ 1 ### Regular Payment
     ))
   )
-piechart(acc_surv, "y")
+piechart(acc_surv_pie, "y") +
+  scale_fill_manual(labels=c("Default", "Early Payment", "Fully Paid"), values=c("darkred", "darkorange", "darkgreen"))
+```
+
+## Survival function
+```{r}
+acc_surv <- acc_surv %>%
+  mutate(actual_duration_to_term = ifelse(y==0, actual_duration_to_term, 1)) %>%
+  mutate(actual_duration_to_term = ifelse(actual_duration_to_term > 1, 1, actual_duration_to_term)) %>%
+  mutate(status = ifelse(y==0,1,0)) # inverto default e fully paid per farli digerire a survfit
+# ignoro gli early payment e i pagamenti in ritardo, settando il tempo a 1 per loro, intendendo che questi prestiti sono sopravvissuti fino alla fine.
+
+hist(as.numeric(acc_surv[acc_surv$status==0, "actual_duration_to_term"]), col="blue", breaks=seq(0,1,0.01))
+hist(as.numeric(acc_surv[acc_surv$status==1, "actual_duration_to_term"]), col = "red", breaks=seq(0,1,0.1), add =T)
+
+fit <- survfit(Surv(actual_duration_to_term, status) ~ 1, data = acc_surv)
+ggsurvplot(fit, xlab = "Years", legend= "none", ggtheme = theme_minimal())
+summary(fit, times = 0.5)
+```
+
+## Cox
+
+```{r}
+acc_surv <- acc_surv %>% select(all_of(model_variables), actual_duration_to_term, status) %>% select(-y)
+acc_surv[, new_numeric_variables[new_numeric_variables %in% names(acc_surv)]] <- scale(model_acc[, new_numeric_variables[new_numeric_variables %in% names(acc_surv)]])
+acc_surv <- acc_surv %>% mutate(term = as.factor(as.character(term)))
+```
+
+### Valutare assunzione «Proportional Hazards»
+
+Per valutare l'assunzione di Proportional Hazards per le covariate si procede dapprima con un check visuale della log(-log(Survival)), che valuta l'assunzione di PH per ogni covariata indipendentemente dalle altre, e successivamente ci si serve dei residui Schoenfeld per valutare l'assunzione di PH tenendo conto anche dalle altre covariate (modello multivariato).
+
+1. log[-log(SKM (t))] --- Graphical check
+
+2. Schoenfeld residuals --- Graphical check
+
+Infine si valuta la forma funzionale assunta dalle variabili continue *age* e *creat*, confrontandola con la forma lineare.
+
+
+#### 1. log[-log(SKM (t))] --- Graphical check
+
+Per l'assunzione di PH abbiamo: $S_X(t) = S_0(t) e^{(\beta' X)}$
+che può essere riscritta come: $log(-log(S_X(t))) - log(-log(S_0(t))) = \beta' X$
+ne segue che la differenza tra i due logaritmi è costante rispetto al tempo se è valida l'assunzione di PH. 
+
+Questo tipo di verifica può essere fatto unicamente sulle variabili non continue, poiché il $log(-log(S_0(t)))$ deve essere confrontato con $log(-log(S_X(t)))$ per ciascun valore di X su tutto l'intervallo temporale.
+
+```{r}
+par(mfrow=c(2,2),mar=c(4,4,2,2))
+
+km.addr_state <- survfit(Surv(actual_duration_to_term, status) ~ addr_state, data=acc_surv)
+plot(km.addr_state, fun="cloglog", ylab="log(-log(Survival))", xlab="log(time_to_term)", main="Check PH assumption of address state")
+
+km.appl_type <- survfit(Surv(actual_duration_to_term, status) ~ application_type, data=acc_surv)
+plot(km.appl_type, fun="cloglog", ylab="log(-log(Survival))", xlab="log(time_to_term)", main="Check PH assumption of application type")
+
+km.emp_length <- survfit(Surv(actual_duration_to_term, status) ~ emp_length, data=acc_surv)
+plot(km.emp_length, fun="cloglog", ylab="log(-log(Survival))", xlab="log(time_to_term)", main="Check PH assumption of employment length")
+
+km.home_ownership <- survfit(Surv(actual_duration_to_term, status) ~ home_ownership, data=acc_surv)
+plot(km.addr_state, fun="cloglog", ylab="log(-log(Survival))", xlab="log(time_to_term)", main="Check PH assumption of home ownership")
+
+km.init_list <- survfit(Surv(actual_duration_to_term, status) ~ initial_list_status, data=acc_surv)
+plot(km.init_list, fun="cloglog", ylab="log(-log(Survival))", xlab="log(time_to_term)", main="Check PH assumption of initial list status")
+
+km.purpose <- survfit(Surv(actual_duration_to_term, status) ~ purpose, data=acc_surv)
+plot(km.purpose, fun="cloglog", ylab="log(-log(Survival))", xlab="log(time_to_term)", main="Check PH assumption of purpose")
+
+km.term <- survfit(Surv(actual_duration_to_term, status) ~ term, data=acc_surv)
+plot(km.term, fun="cloglog", ylab="log(-log(Survival))", xlab="log(time_to_term)", main="Check PH assumption of term")
+
+km.ver_status <- survfit(Surv(actual_duration_to_term, status) ~ verification_status, data=acc_surv)
+plot(km.ver_status, fun="cloglog", ylab="log(-log(Survival))", xlab="log(time_to_term)", main="Check PH assumption of verification status")
+
+km.fico_class <- survfit(Surv(actual_duration_to_term, status) ~ fico_class, data=acc_surv)
+plot(km.fico_class, fun="cloglog", ylab="log(-log(Survival))", xlab="log(time_to_term)", main="Check PH assumption of fico class")
+```
+
+L'assunzione di PH pare valere per tutte le variabili categoriche, mentre sembra che non valga per la "fico class".
+
+#### 2. Schoenfeld residuals --- Graphical check
+
+I residui Schoenfeld sono definiti come: $r_j = x_j - E[x_j|R_j]$ \
+dove $x_j$ è la covariata dell'individuo che *fallisce* al tempo $t_{(j)}$ e $R_j$ è il risk set al tempo $t_{(j)}$.
+Ci si aspetta che il valore atteso dei residui sia 0, ne segue che l'andamento dei residui rispetto al tempo deve essere costante. Si plottano i residui Schoenfeld standardizzati.
+
+
+```{r}
+model_base <- coxph(Surv(actual_duration_to_term, status) ~ ., data = acc_surv %>% select(-home_ownership))
+czph <- cox.zph(model_base, terms = F)
+
+par(mfrow=c(3,3),mar=c(4,4,2,2))
+plot(czph, resid=FALSE)
+```
+
+Per molte variabili non vale l'assunzione di PH, le escludiamo. Alcune, sebbene graficamente sarebbero da escludere, sono invece tenute per via della scala. Ad esempio beta(t) di annual_inc è chiaramente non costante, tuttavia la variazione avviene su un ordine di grandezza di 1e-6 !!! 
+
+```{r}
+acc_ph <- acc_surv %>% select(-application_type, -initial_list_status, -int_rate, -num_rev_tl_bal_gt_0, -pct_tl_nvr_dlq, -purpose, -revol_bal, -revol_util, -term, -total_acc, -verification_status, -mo_sin_earliest_cr_line, -num_bc_not_sats)
 ```
 
 ```{r}
-fit <- survfit(Surv(actual_duration_to_term, y) ~ 1, data = acc_surv)
-plot(fit, col=c("black", "red"), ylab="Survival", xlab="time")
-summary(fit, times = 10)
+model <- coxph(Surv(actual_duration_to_term, status) ~ ., acc_ph)
+summary(model)
+
+model <- coxph(Surv(actual_duration_to_term, status) ~ ., acc_ph %>% select(-home_ownership))
+summary(model)
+
+```
+
+## Calibration
+
+Si procede con la costruzione dei modelli, specificando l'opzione x = TRUE per poter poi utilizzare la funzione Score del pacchetto riskRegression.
+Creo un modello aumentato con le variabili per cui non vale PH.
+
+```{r}
+model_base <- coxph(model$formula, data = acc_surv, x = T)
+
+model_aug <- coxph(Surv(actual_duration_to_term, status) ~ ., data = acc_surv, x = T)
+
+score <- Score(list("Base Model"=model_base,"Augmented Model"=model_aug),
+              formula=Surv(actual_duration_to_term, status)~1,
+              data=acc_surv, conf.int=T,
+              times=seq(0,1,0.1),
+              plots=c("calibration","ROC"))
+
+# internal cross-validation
+CVscore<- Score(list("Base Model"=model_base,"Augmented Model"=model_aug),
+                formula=Surv(actual_duration_to_term, status)~1,
+                data=acc_surv,conf.int=T,
+                times=seq(0,1,0.1),
+                plots="calibration",
+                split.method="loob",B=100,seed=2021)
+```
+
+Si decide di prendere il time-point a metà del termine e si valutano le performance dei modelli sui tre aspetti: calibrazione, discriminazione, net benefit.
+
+Per valutare la calibrazione dei modelli si usano insieme il Calibration Plot e il Brier Score.
+
+```{r}
+plotCalibration(score,times=0.5,cens.method="local",method="quantile",q=10, auc.in.legend = F)
+title(main="Calibration at half term")
+
+plotCalibration(CVscore,times=5,cens.method="local",method="quantile",q=10, auc.in.legend = F)
+title(main="Calibration at half term")
+```
+
+### Discrimination
+
+```{r}
+plotROC(score,times=0.5,cens.method="local")
+title(main="time-dependent ROC at half term")
+```
+
+
+```{r}
+CVscore$AUC$score %>% filter(times == 5, model %in% c("Base Model", "Augmented Model")) %>% mutate(C.I = paste0("[", round(lower, 2), ",", round(upper,2), "]")) %>% select(model, AUC, C.I) %>% pander()
+```
+
+
+### Net Benefit
+
+Quanto appena osservato ci indica che entrambi i modelli sono molto simili in quanto a calibrazione e capacità di discriminazione. \
+Per arrivare infine a una valutazione dei modelli che ci consenta di affermare quale dei due sia migliore si stima il Net Benefit di ciascun modello e si confrontano i valori così ottenuti.
+
+
+```{r include=FALSE}
+source("data_preparation/stdca.R")
+
+fit_base<-survfit(model_base,newdata=d)
+d$riskdeath_base<- 1-as.numeric(summary(fit_base,times=5)$surv)
+fit_aug<-survfit(model_aug,newdata=d)
+d$riskdeath_aug<- 1-as.numeric(summary(fit_aug,times=5)$surv)
+
+netbenefit <- stdca(data = d, outcome = "status", ttoutcome = "fuyrs", timepoint = 5, xstop = 0.5, 
+                    predictors = c("riskdeath_base","riskdeath_aug"))
+```
+
+```{r}
+par(mar = c(5, 4.5, 4, 1)) 
+
+# Net Benefit for model_base:
+plot(netbenefit$net.benefit$threshold, netbenefit$net.benefit$riskdeath_base, type = "l", lwd = 3, 
+     xlim = c(0, 1), ylim = c(0, 0.2), xlab = "Riskdeath", ylab = "Net Benefit", xaxt = "n", yaxt = "n", 
+     cex.lab = 1.7, cex.axis = 1.6, frame = F)
+axis(1, at = seq(0,1,0.1), labels = NA, pos = 0)
+axis(1, at = seq(0,1,0.1), labels = seq(0,1,0.1), cex.axis = 1.7, pos = 0)
+axis(2, at = c(0,0.05,0.1,0.15,0.2), labels = c(0,0.05,0.1,0.15,0.2), cex.axis = 1.7, pos = 0)
+
+# Net Benefit for model_aug:
+lines(netbenefit$net.benefit$threshold, netbenefit$net.benefit$riskdeath_aug, type = "l", lty = 3, lwd = 3) 
+
+# We add an extra axis on the top of the graph with the costs:
+axis(3, at = c(0,0.2,0.4,0.6,0.8,1), labels = c(0,0.25,0.67,1.5,4,'Inf'), cex.axis = 1.6)
+mtext("Cost", side = 3, line = 2.5, cex = 1.7, las = 1)
+
+legend('topright', c("Base Model","Augmented Model"), lwd = c(3, 3), lty = c(1, 3), col = c(1, 1), bty = 'n', cex = 1.7)
 ```
 
 
