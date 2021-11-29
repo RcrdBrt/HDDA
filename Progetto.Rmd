@@ -164,10 +164,10 @@ acc_with_current <- acc
 acc <- acc %>% 
   filter(loan_status %notin% c("Current", "In Grace Period", "Late (16-30 days)")) %>%
   mutate(y=case_when(
-    loan_status == "Late (31-120 days)" ~ 0,
-    loan_status == "Charged Off" ~ 0,
-    loan_status == "Default" ~ 0,
-    loan_status == "Fully Paid" ~ 1
+    loan_status == "Late (31-120 days)" ~ 1,
+    loan_status == "Charged Off" ~ 1,
+    loan_status == "Default" ~ 1,
+    loan_status == "Fully Paid" ~ 0
   )) %>%
   mutate(addr_state=case_when(
     addr_state %in% c("WA", "OR", "CA", "HI", "AL", "AK") ~ "West Coast",
@@ -216,7 +216,7 @@ source("data_preparation/plot_osservazioni_e_tempo.R", print.eval = T)
 ```{r}
 source("data_preparation/pie_chart_default_VS_fully_paid.R", print.eval = T)
 piechart(acc,group="y") +
-  scale_fill_manual(labels=c("Default", "Fully Paid"), values=c("darkred","darkgreen"))
+  scale_fill_manual(labels=c("Fully Paid", "Default"), values=c("darkgreen","darkred"))
 ```
 
 ### ROI boxplot/violinplot (for each grade?)
@@ -527,31 +527,31 @@ To distinguish between Regalur Payment and Early Payment we define a tolerance o
 ```{r}
 acc_surv <- acc
 acc_surv <- acc_surv %>% 
-  mutate(term=as.numeric(substring(as.character(term),0,2))) %>%
-  mutate(actual_duration_to_term = as.numeric(last_pymnt_d - issue_d) / (term*30))
-hist(as.numeric(acc_surv[acc$y==1, "actual_duration_to_term"]), col = "blue")
-hist(as.numeric(acc_surv[acc$y==0, "actual_duration_to_term"]), col="red",add =T)
+  mutate(actual_duration_to_term = as.numeric(last_pymnt_d - issue_d) / (as.numeric(substring(as.character(term),0,2))*30))
+hist(as.numeric(acc_surv[acc$y==0, "actual_duration_to_term"]), col = "darkgreen")
+hist(as.numeric(acc_surv[acc$y==1, "actual_duration_to_term"]), col="darkred",add =T)
 acc_surv_pie <- acc_surv %>%
   mutate(y = as.factor(case_when(
-      y == 0 ~ 0, ### Deafult
-      (y == 1) & (actual_duration_to_term < 0.8) ~ 2, ### Early Payment
-      T ~ 1 ### Regular Payment
+      y == 1 ~ 1, ### Default
+      (y == 0) & (actual_duration_to_term < 0.8) ~ -1, ### Early Payment
+      T ~ 0 ### Regular Payment
     ))
   )
 piechart(acc_surv_pie, "y") +
-  scale_fill_manual(labels=c("Default", "Early Payment", "Fully Paid"), values=c("darkred", "darkorange", "darkgreen"))
+  scale_fill_manual(labels=c("Regular Payment", "Early Payment", "Default"), values=c("darkgreen", "darkgray", "darkred"))
 ```
 
 ## Survival function
+
 ```{r}
 acc_surv <- acc_surv %>%
-  mutate(actual_duration_to_term = ifelse(y==0, actual_duration_to_term, 1)) %>%
+  mutate(actual_duration_to_term = ifelse(y==1, actual_duration_to_term, 1)) %>%
   mutate(actual_duration_to_term = ifelse(actual_duration_to_term > 1, 1, actual_duration_to_term)) %>%
-  mutate(status = ifelse(y==0,1,0)) # inverto default e fully paid per farli digerire a survfit
+  mutate(status = as.numeric(as.character(y)))
 # ignoro gli early payment e i pagamenti in ritardo, settando il tempo a 1 per loro, intendendo che questi prestiti sono sopravvissuti fino alla fine.
 
-hist(as.numeric(acc_surv[acc_surv$status==0, "actual_duration_to_term"]), col="blue", breaks=seq(0,1,0.01))
-hist(as.numeric(acc_surv[acc_surv$status==1, "actual_duration_to_term"]), col = "red", breaks=seq(0,1,0.1), add =T)
+hist(as.numeric(acc_surv[acc_surv$y==0, "actual_duration_to_term"]), col="darkgreen", breaks=seq(0,1,0.01))
+hist(as.numeric(acc_surv[acc_surv$y==1, "actual_duration_to_term"]), col = "darkred", breaks=seq(0,1,0.05),add=T)
 
 fit <- survfit(Surv(actual_duration_to_term, status) ~ 1, data = acc_surv)
 ggsurvplot(fit, xlab = "Years", legend= "none", ggtheme = theme_minimal())
@@ -563,7 +563,6 @@ summary(fit, times = 0.5)
 ```{r}
 acc_surv <- acc_surv %>% select(all_of(model_variables), actual_duration_to_term, status) %>% select(-y)
 acc_surv[, new_numeric_variables[new_numeric_variables %in% names(acc_surv)]] <- scale(model_acc[, new_numeric_variables[new_numeric_variables %in% names(acc_surv)]])
-acc_surv <- acc_surv %>% mutate(term = as.factor(as.character(term)))
 ```
 
 ### Valutare assunzione «Proportional Hazards»
@@ -636,16 +635,12 @@ plot(czph, resid=FALSE)
 Per molte variabili non vale l'assunzione di PH, le escludiamo. Alcune, sebbene graficamente sarebbero da escludere, sono invece tenute per via della scala. Ad esempio beta(t) di annual_inc è chiaramente non costante, tuttavia la variazione avviene su un ordine di grandezza di 1e-6 !!! 
 
 ```{r}
-acc_ph <- acc_surv %>% select(-application_type, -initial_list_status, -int_rate, -num_rev_tl_bal_gt_0, -pct_tl_nvr_dlq, -purpose, -revol_bal, -revol_util, -term, -total_acc, -verification_status, -mo_sin_earliest_cr_line, -num_bc_not_sats)
+acc_ph <- acc_surv %>% select(-application_type, -initial_list_status, -int_rate, -num_rev_tl_bal_gt_0, -pct_tl_nvr_dlq, -purpose, -revol_bal, -revol_util, -term, -total_acc, -verification_status, -mo_sin_earliest_cr_line, -num_bc_not_sats, -home_ownership, -addr_state)
 ```
 
 ```{r}
 model <- coxph(Surv(actual_duration_to_term, status) ~ ., acc_ph)
 summary(model)
-
-model <- coxph(Surv(actual_duration_to_term, status) ~ ., acc_ph %>% select(-home_ownership))
-summary(model)
-
 ```
 
 ## Calibration
@@ -654,23 +649,43 @@ Si procede con la costruzione dei modelli, specificando l'opzione x = TRUE per p
 Creo un modello aumentato con le variabili per cui non vale PH.
 
 ```{r}
-model_base <- coxph(model$formula, data = acc_surv, x = T)
+library(riskRegression)
+library(future)
+library(foreach)
+library(doFuture)
+library(survival)
+plan(multiprocess, workers = availableCores())
+registerDoFuture()
+options(future.globals.maxSize= 2000*1024^2)
+```
 
-model_aug <- coxph(Surv(actual_duration_to_term, status) ~ ., data = acc_surv, x = T)
+```{r}
+#train.surv <- ...
+model_base <- coxph(model$formula, data = acc_surv %>% select(-addr_state,-home_ownership), x = T,y=T)
 
-score <- Score(list("Base Model"=model_base,"Augmented Model"=model_aug),
+model_aug <- coxph(Surv(actual_duration_to_term, status) ~ ., data = acc_surv %>% select(-addr_state,-home_ownership), x = T,y=T)
+
+score <- Score(list("Base model"=model_base,"Augmented Model"=model_aug),
               formula=Surv(actual_duration_to_term, status)~1,
-              data=acc_surv, conf.int=T,
-              times=seq(0,1,0.1),
-              plots=c("calibration","ROC"))
+              data=acc_surv, conf.int=F,
+              times=seq(0.1,0.9,0.2),
+              plots=c("calibration","ROC"),
+              progress.bar=1)
 
 # internal cross-validation
-CVscore<- Score(list("Base Model"=model_base,"Augmented Model"=model_aug),
-                formula=Surv(actual_duration_to_term, status)~1,
-                data=acc_surv,conf.int=T,
-                times=seq(0,1,0.1),
-                plots="calibration",
-                split.method="loob",B=100,seed=2021)
+CVscore <- Score(list("Base model"=model_base,"Augmented Model"=model_aug),
+              formula=Surv(actual_duration_to_term, status)~1,
+              data=acc_surv %>% select(-addr_state,-home_ownership), conf.int=F,
+              times=c(0.5),
+              #times=seq(0.1,0.9,0.2),
+              plots="calibration",
+              split.method="bootcv",B=10,M=100,seed=2021,
+              parallel="as.registered",
+              progress.bar=1)
+```
+
+```{r}
+acc_surv
 ```
 
 Si decide di prendere il time-point a metà del termine e si valutano le performance dei modelli sui tre aspetti: calibrazione, discriminazione, net benefit.
@@ -678,7 +693,7 @@ Si decide di prendere il time-point a metà del termine e si valutano le perform
 Per valutare la calibrazione dei modelli si usano insieme il Calibration Plot e il Brier Score.
 
 ```{r}
-plotCalibration(score,times=0.5,cens.method="local",method="quantile",q=10, auc.in.legend = F)
+plotCalibration(score,times=0.5, cens.method="local",method="quantile", q=20, auc.in.legend = F, xlim = c(0,0.40),ylim=c(0,0.40))
 title(main="Calibration at half term")
 
 plotCalibration(CVscore,times=5,cens.method="local",method="quantile",q=10, auc.in.legend = F)
@@ -694,7 +709,7 @@ title(main="time-dependent ROC at half term")
 
 
 ```{r}
-CVscore$AUC$score %>% filter(times == 5, model %in% c("Base Model", "Augmented Model")) %>% mutate(C.I = paste0("[", round(lower, 2), ",", round(upper,2), "]")) %>% select(model, AUC, C.I) %>% pander()
+CVscore$AUC$score %>% filter(times == 0.5, model %in% c("Base Model", "Augmented Model")) %>% mutate(C.I = paste0("[", round(lower, 2), ",", round(upper,2), "]")) %>% select(model, AUC, C.I) %>% pander()
 ```
 
 
