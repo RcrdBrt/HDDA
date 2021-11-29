@@ -20,7 +20,7 @@ if(!require(glmnet)) install.packages("glmnet")
 if(!require(factoextra)) install.packages("factoextra")
 if(!require(caret)) install.packages("caret")
 if(!require(ranger)) install.packages("ranger")
-if(!require(ordinalForest)) install.packages("ordinalForest")
+if(!require(randomForest)) install.packages("randomForest")
 if(!require(InformationValue)) install.packages("InformationValue")
 if(!require(kernlab)) install.packages("kernlab")
 if(!require(e1071)) install.packages("e1071")
@@ -39,7 +39,7 @@ library(glmnet)
 library(factoextra)
 library(caret)
 library(ranger)
-library(ordinalForest) 
+library(randomForest) 
 library(InformationValue) 
 library(kernlab) 
 library(e1071) 
@@ -297,8 +297,8 @@ acc <- acc %>%
   )) %>% select(-fico_mean) %>% mutate(fico_class=as.factor(fico_class))
 
 acc <- acc %>% 
-  mutate(num_not_sats = open_acc - num_sats,
-         num_bc_not_sats = num_bc_tl - num_bc_sats) %>%
+  mutate(num_not_sats = (open_acc - num_sats)/open_acc,
+         num_bc_not_sats = (num_bc_tl - num_bc_sats)/num_bc_tl) %>%
   select(-num_sats, num_bc_sats)
 
 # tolte le correlazioni, restano queste variabili esplicative numeriche
@@ -480,18 +480,21 @@ plotROC(test.balanced$y, yhat.lasso.cv.1se)
 
 
 
-## Caret
+## SVM
 
 ```{r}
 set.seed(1000)
 
-fit.svm = train(
-  y ~ .,
-  data=train.balanced,
-  method="svmLinear2",
-  trControl=trainControl(method="repeatedcv", number=10, repeats=20),
-  tuneGrid=expand.grid(cost=3^(-7:7))
-)
+fit.svm = svm(y ~ ., train.balanced)
+
+plot(fit.svm)
+
+```
+
+
+# Random Forest
+
+```{r}
 
 ```
 
