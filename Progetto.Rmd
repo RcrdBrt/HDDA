@@ -485,7 +485,7 @@ plotROC(test.balanced$y, yhat.lasso.cv.1se)
 ```{r}
 set.seed(1000)
 
-fit.svm = svm(y ~ ., train.balanced)
+fit.svm = svm(y ~ ., train.balanced %>% select(annual_inc,y))
 
 plot(fit.svm)
 
@@ -495,7 +495,19 @@ plot(fit.svm)
 # Random Forest
 
 ```{r}
+set.seed(1000)
 
+acc.balanced.tiny <- model_acc %>% group_by(y) %>% sample_n(10000) %>% ungroup()
+
+train.balanced.tiny = sample_frac(acc.balanced.tiny, 0.8)
+test.balanced.tiny = anti_join(acc.balanced.tiny, train.balanced.tiny)
+
+fit.rf = randomForest(y ~ ., train.balanced.tiny, mtry = sqrt(length(names(train.balanced.tiny))), ntree=200)
+plot(fit.rf)
+
+yhat.rf = predict(fit.rf, test.balanced.tiny %>% select(-y), type="prob", norm.votes=T)
+
+plotROC(test.balanced.tiny$y, yhat.rf[,2])
 ```
 
 
