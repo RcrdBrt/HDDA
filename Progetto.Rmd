@@ -164,10 +164,10 @@ acc_with_current <- acc
 acc <- acc %>% 
   filter(loan_status %notin% c("Current", "In Grace Period", "Late (16-30 days)")) %>%
   mutate(y=case_when(
-    loan_status == "Late (31-120 days)" ~ 1,
-    loan_status == "Charged Off" ~ 1,
-    loan_status == "Default" ~ 1,
-    loan_status == "Fully Paid" ~ 0
+    loan_status == "Late (31-120 days)" ~ 0,
+    loan_status == "Charged Off" ~ 0,
+    loan_status == "Default" ~ 0,
+    loan_status == "Fully Paid" ~ 1
   )) %>%
   mutate(addr_state=case_when(
     addr_state %in% c("WA", "OR", "CA", "HI", "AL", "AK") ~ "West Coast",
@@ -195,8 +195,10 @@ acc <- acc %>%
     purpose=as.factor(purpose),
     sub_grade=as.factor(sub_grade),
     term=as.factor(term),
-    verification_status=as.factor(verification_status),
-  ) %>% select(-loan_status)
+    verification_status=as.factor(verification_status)
+  ) %>% 
+  filter(home_ownership %notin% c("ANY", "NONE", "OTHER"))  %>% 
+  select(-loan_status)
 set.seed(1000)
 source("data_preparation/outliers.R", print.eval = T)
 ```
@@ -371,13 +373,23 @@ test.balanced = anti_join(acc.balanced,train.balanced)
 set.seed(1000)
 fit.glm <- glm(y~., train.balanced, family="binomial")
 
-yhat.glm <- predict(fit.glm, test.balanced)-1
+summary(fit.glm)
+```
+
+```{r}
+yhat.glm <- predict(fit.glm, test.balanced, type="response")
 
 confusionMatrix(test.balanced$y, yhat.glm)
 ```
 
 ```{r}
-plotROC(test.balanced$y, yhat.glm)
+InformationValue::plotROC(test.balanced$y, yhat.glm)
+```
+```{r}
+confusionMatrix(test.balanced$y, yhat.glm, threshold = 0.8)
+```
+```{r}
+precision(test.balanced$y, yhat.glm, threshold = 0.8)
 ```
 
 
@@ -387,10 +399,12 @@ set.seed(1000)
 pca.res <- prcomp(scale(as.matrix(acc[,new_numeric_variables])))
 fviz_eig(pca.res)
 
-print(pca.res$sdev)
+print(pca.res$sdev) # si prendono quelle > 1
+```
 
+
+```{r}
 acc_pca <- as.data.frame(scale(as.matrix(acc[,new_numeric_variables])) %*% pca.res$rotation)[,1:8] # prime otto variabili
-#acc_pca <- acc_pca %>% cbind(acc %>% select(-new_numeric_variables))
 acc_pca <- acc_pca %>% cbind(acc%>%select(y))
 ```
 
@@ -404,28 +418,37 @@ test.balanced.pca <- anti_join(acc.balanced.pca,train.balanced.pca)
 
 fit.pca <- glm(y~., train.balanced.pca, family="binomial")
 
-yhat.pca <- predict(fit.pca, test.balanced.pca)
+yhat.pca <- predict(fit.pca, test.balanced.pca, type="response")
 
 ytest.pca = test.balanced.pca$y
 
 confusionMatrix(ytest.pca, yhat.pca)
 ```
-
 ```{r}
-plotROC(ytest.pca, yhat.pca)
+precision(ytest.pca, yhat.pca, threshold=0.8)
 ```
 
+
+```{r}
+InformationValue::plotROC(ytest.pca, yhat.pca)
+```
+Cerchiamo quindi altri metodi blah vlah
 
 ## Best Subset Selection (BSS)
 
 ```{r}
 set.seed(1000)
-fit.bss = step(fit.glm, direction = "backward", trace=T)
+fit.glm.backwards = step(fit.glm, direction = "backward", trace=T)
 
-yhat.bss = predict(fit.bss, test.balanced %>% select(-y))
+yhat.glm.backwards = predict(fit.glm.backwards, test.balanced %>% select(-y))
 
-plotROC(test.balanced$y, yhat.bss)
+InformationValue::plotROC(test.balanced$y, yhat.glm.backwards)
 ```
+
+```{r}
+precision(test.balanced$y, yhat.glm.backwards)
+```
+Backward e' troppo pesante, cerchiamo altri metodi
 
 ## Ridge
 
@@ -433,18 +456,15 @@ plotROC(test.balanced$y, yhat.bss)
 set.seed(1000)
 
 Xlm.train <- model.matrix(fit.glm)[,-1]
-fit.ridge <- glmnet(Xlm, train.balanced$y, alpha = 0, family="binomial", nlambda = 100)    # alpha=0: ridge
-
-summary(fit.ridge)
-```
-
-```{r}
+fit.ridge <- glmnet(Xlm.train, train.balanced$y, alpha = 0, family="binomial", nlambda = 100)    # alpha=0: ridge
 plot(fit.ridge, xvar="lambda")
 ```
+
+
 ```{r}
 set.seed(1000)
 K <- 10
-fit.ridge.cv <- cv.glmnet(Xlm.train, train.balanced$y, alpha=0, nfolds = K, grouped = FALSE, family="binomial", type.measure = "auc")
+fit.ridge.cv <- cv.glmnet(Xlm.train, train.balanced$y, alpha=0, nfolds = K, grouped = FALSE, family="binomial")
 
 plot(fit.ridge.cv)
 ```
@@ -452,21 +472,31 @@ plot(fit.ridge.cv)
 ```{r}
 Xlm.test = model.matrix(glm(y ~ ., test.balanced, family = "binomial"))[,-1]
 
-yhat.ridge.cv.1se = predict(fit.ridge.cv$glmnet.fit, Xlm.test, s = "lambda.1se") manually
+yhat.ridge.cv.1se = predict(fit.ridge.cv$glmnet.fit, Xlm.test, s = "lambda.1se")
 
-confusionMatrix(test.balanced$y, yhat.ridge.cv.1se)
+confusionMatrix(test.balanced$y, yhat.ridge.cv.1se, threshold = 0.8)
 ```
+
+
 ```{r}
-plotROC(test.balanced$y, yhat.ridge.cv.1se)
+InformationValue::plotROC(test.balanced$y, yhat.ridge.cv.1se)
 ```
 
+
+```{r}
+precision(test.balanced$y, yhat.ridge.cv.1se, threshold = 0.8)
+```
 
 ## Lasso
 ```{r}
 set.seed(1000)
 K <- 10
-fit.lasso.cv <- cv.glmnet(Xlm, train.balanced$y, alpha=1, nfolds = K, grouped = FALSE, family="binomial", type.measure="auc" ,parallel=TRUE)
+fit.lasso.cv <- cv.glmnet(Xlm, train.balanced$y, alpha=1, nfolds = K, grouped = FALSE, family="binomial")
 plot(fit.lasso.cv)
+```
+
+
+```{r}
 coef(fit.lasso.cv)
 ```
 
@@ -475,24 +505,20 @@ set.seed(1000)
 yhat.lasso.cv.1se <- predict(fit.lasso.cv, Xlm.test, s = "lambda.1se")
 confusionMatrix(
   test.balanced$y,
-  yhat.lasso,
-  threshold = InformationValue::optimalCutoff(test.balanced$y, yhat.lasso, optimiseFor = "misclasserror"))
-plotROC(test.balanced$y, yhat.lasso.cv.1se)
+  yhat.lasso.cv.1se,
+  threshold = 0.8)
 ```
-
-
-
-## SVM
 
 ```{r}
-set.seed(1000)
-
-fit.svm = svm(y ~ ., train.balanced %>% select(annual_inc,y))
-
-plot(fit.svm)
-
+InformationValue::plotROC(test.balanced$y, yhat.lasso.cv.1se)
 ```
 
+```{r}
+precision(test.balanced$y, yhat.lasso.cv.1se, threshold = 0.8)
+```
+
+
+La lasso e' bella
 
 # Random Forest
 
@@ -501,20 +527,45 @@ set.seed(1000)
 
 acc.balanced.tiny <- model_acc %>% group_by(y) %>% sample_n(10000) %>% ungroup()
 
-train.balanced.tiny = sample_frac(acc.balanced.tiny, 0.8)
+train.balanced.tiny = sample_frac(acc.balanced.tiny, 0.7)
 test.balanced.tiny = anti_join(acc.balanced.tiny, train.balanced.tiny)
 
-fit.rf = randomForest(y ~ ., train.balanced.tiny, mtry = sqrt(length(names(train.balanced.tiny))), ntree=200, importance=T)
+fit.rf.bestMtry = tuneRF(train.balanced.tiny %>% select(-y), train.balanced.tiny$y, ntreeTry = 100, doBest=T)
 
-varImpPlot(fit.rf, type=1)
+varImpPlot(fit.rf.bestMtry, type=1)
+```
 
-tuneRF(train.balanced.tiny %>% select(-y), train.balanced.tiny$y, ntreeTry = 100)
 
-plot(fit.rf)
+```{r}
+fit.rf.bestMtry = tuneRF(train.balanced.tiny %>% select(-y), train.balanced.tiny$y, ntreeTry = 200, doBest=T)
 
-yhat.rf = predict(fit.rf, test.balanced.tiny %>% select(-y), type="prob", norm.votes=T)
+varImpPlot(fit.rf.bestMtry, type=1)
+```
 
-plotROC(test.balanced.tiny$y, yhat.rf[,2])
+
+```{r}
+plot(fit.rf.bestMtry)
+```
+
+
+```{r}
+yhat.rf = predict(fit.rf.bestMtry, test.balanced.tiny %>% select(-y), type="prob", norm.votes=T)
+
+InformationValue::confusionMatrix(test.balanced.tiny$y, yhat.rf[,2], threshold = 0.8)
+```
+
+
+```{r}
+InformationValue::plotROC(test.balanced.tiny$y, yhat.rf[,2])
+```
+
+```{r}
+precision(test.balanced.tiny$y, yhat.rf[,2], threshold = 0.8)
+```
+
+```{r}
+set.seed(1000)
+fit.rf.cv = rfcv(train.balanced.tiny %>% select(-y), train.balanced.tiny$y, cv.fold = 10)
 ```
 
 
@@ -654,7 +705,7 @@ library(future)
 library(foreach)
 library(doFuture)
 library(survival)
-plan(multiprocess, workers = availableCores())
+#plan(multiprocess, workers = availableCores())
 registerDoFuture()
 options(future.globals.maxSize= 2000*1024^2)
 ```
@@ -680,7 +731,7 @@ CVscore <- Score(list("Base model"=model_base,"Augmented Model"=model_aug),
               #times=seq(0.1,0.9,0.2),
               plots="calibration",
               split.method="bootcv",B=10,M=100,seed=2021,
-              parallel="as.registered",
+              parallel="multicore",
               progress.bar=1)
 ```
 
