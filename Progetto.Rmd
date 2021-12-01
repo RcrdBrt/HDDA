@@ -27,6 +27,7 @@ if(!require(e1071)) install.packages("e1071")
 if(!require(survival)) install.packages("survival")
 if(!require(survminer)) install_github("kassambara/survminer", build_vignettes = FALSE)
 if(!require(riskRegression)) install.packages("riskRegression")
+if(!require(doParallel)) install.packages("doParallel")
 library(data.table)
 library(Hmisc)
 library(dplyr)
@@ -46,6 +47,7 @@ library(kernlab)
 library(e1071) 
 library(survival)
 library(riskRegression)
+library(doParallel)
 `%notin%` <- Negate(`%in%`)
 ```
 
@@ -565,7 +567,17 @@ precision(test.balanced.tiny$y, yhat.rf[,2], threshold = 0.8)
 
 ```{r}
 set.seed(1000)
-fit.rf.cv = rfcv(train.balanced.tiny %>% select(-y), train.balanced.tiny$y, cv.fold = 10)
+
+cluster = makePSOCKcluster(8)
+registerDoParallel(cluster)
+fit.rf.100trees = train(y ~ ., train.balanced.tiny, method="rf", ntree = 100,
+               tuneGrid=expand.grid(.mtry=seq(1, 29, 2)),
+               trControl = trainControl(method="cv", number = K, search="grid"))
+fit.rf.1000trees = train(y ~ ., train.balanced.tiny, method="rf", ntree = 1000,
+               tuneGrid=expand.grid(.mtry=seq(1, 29, 2)),
+               trControl = trainControl(method="cv", number = K, search="grid"))
+stopCluster(cluster)
+plot(fit.rf)
 ```
 
 
