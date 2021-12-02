@@ -525,28 +525,56 @@ La lasso e' bella
 # Random Forest
 
 ```{r}
+customTuneRF = function (x, y, ntree) 
+{
+  e = tuneRF(x, y, trace=T)
+  
+  randomForest(x, y, mtry=e[which.min(e[, 
+      2]), 1], ntree=ntree, importance=T)
+}
+```
+
+
+```{r}
 set.seed(1000)
 
 acc.balanced.tiny <- model_acc %>% group_by(y) %>% sample_n(10000) %>% ungroup()
 
-train.balanced.tiny = sample_frac(acc.balanced.tiny, 0.7)
+train.balanced.tiny = sample_frac(acc.balanced.tiny, 0.8)
 test.balanced.tiny = anti_join(acc.balanced.tiny, train.balanced.tiny)
 
-fit.rf.bestMtry = tuneRF(train.balanced.tiny %>% select(-y), train.balanced.tiny$y, ntreeTry = 100, doBest=T)
-
-varImpPlot(fit.rf.bestMtry, type=1)
+set.seed(1000)
+fit.rf.bestMtry.500t = customTuneRF(train.balanced.tiny %>% select(-y), train.balanced.tiny$y, ntree=500)
 ```
 
 
 ```{r}
-fit.rf.bestMtry = tuneRF(train.balanced.tiny %>% select(-y), train.balanced.tiny$y, ntreeTry = 200, doBest=T)
+varImpPlot(fit.rf.bestMtry.500t, type=1)
+```
 
-varImpPlot(fit.rf.bestMtry, type=1)
+```{r}
+plot(fit.rf.bestMtry.500t)
 ```
 
 
 ```{r}
-plot(fit.rf.bestMtry)
+set.seed(1000)
+fit.rf.bestMtry.250t = customTuneRF(train.balanced.tiny %>% select(-y), train.balanced.tiny$y, ntree=250)
+```
+
+
+```{r}
+varImpPlot(fit.rf.bestMtry.250t, type=1)
+```
+
+
+```{r}
+plot(fit.rf.bestMtry.250t)
+```
+```{r fig.width=20, fig.height=12}
+par(mfrow=c(1, 2))
+plot(fit.rf.bestMtry.500t)
+plot(fit.rf.bestMtry.250t)
 ```
 
 
