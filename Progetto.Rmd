@@ -82,18 +82,23 @@ piechart <- function(d, group, legend_title = "Outcome"){
     theme_void()
 }
 
-MyConfusionMatrix <- function(actuals,predictions,threshold=0.5, title=""){
+
+MyConfusionMatrix <- function(actuals, predictions, threshold=0.5, title=""){
   cm <- caret::confusionMatrix(as.factor(ifelse(predictions>threshold,1,0)), actuals, threshold, dnn=c("Prediction", "Actual"), positive="1", mode="prec_recall")
   ggplot(as.data.frame(cm$table), aes(Actual, Prediction, fill= Freq)) +
     geom_tile() + geom_text(aes(label=Freq), fontface="bold") +
     scale_fill_distiller(palette="Greens",guide="none", direction = 1) +
-    labs(x = "Actual",y = "Prediction", title=title, subtitle=paste("Precision at 0.5 threshold:", round(precision(actuals,predictions,threshold),3)*100,"%")) +
+    labs(x = "Actual",y = "Prediction", title=title, subtitle=
+           paste(
+             "Precision at 0.5 threshold:",
+             round(precision(actuals,predictions,threshold),3)*100, "%")) +
     scale_x_discrete(labels=c("Default", "Fully Paid")) +
     scale_y_discrete(labels=c("Fully Paid","Default"), limits=rev) +
     theme_minimal() + 
     theme(plot.title = element_text(hjust = 0.5, size = 16),
           plot.subtitle = element_text(hjust = 0.5, size = 12)) 
 }
+
 
 plot_precision_vs_npred <- function(actuals, predictions, title=""){
   p <- vector("list", length(predictions))
@@ -433,7 +438,7 @@ model_acc[, model_num_variables] <- scale(model_acc[, model_num_variables])
 corrplot(cor(model_acc[, model_num_variables]))
 ```
 
-```{r}
+```{r message=F}
 set.seed(1000)
 train <- sample_frac(model_acc, 0.7)
 test <- anti_join(model_acc,train)
@@ -460,27 +465,30 @@ vif(fit.glm.unbalanced)
 
 ```{r}
 yhat.glm.unbalanced <- predict(fit.glm.unbalanced, test, type="response")
-cat("Accuracy of Unbalanced Model:", 1-InformationValue::misClassError(test$y, yhat.glm.unbalanced))
+cat("Train Accuracy of Unbalanced Model:", 1-InformationValue::misClassError(train$y, fit.glm.unbalanced$fitted.values), "\n")
+cat("Test Accuracy of Unbalanced Model:", 1-InformationValue::misClassError(test$y, yhat.glm.unbalanced))
 ```
 
 ```{r}
 train.under <- train %>% group_by(y) %>% slice_sample(n=min(table(train$y))) %>% ungroup()
 fit.glm.under <- glm(y~., train.under, family="binomial")
 yhat.glm.under<- predict(fit.glm.under, test, type="response")
-cat("Accuracy of UnderSampling Model:", 1-InformationValue::misClassError(test$y, yhat.glm.under))
+cat("Train Accuracy of UnderSampling Model:", 1-InformationValue::misClassError(train.under$y, fit.glm.under$fitted.values), "\n")
+cat("Test Accuracy of UnderSampling Model:", 1-InformationValue::misClassError(test$y, yhat.glm.under))
 ```
 
 ```{r}
 fit.glm <- glm(y~., train, family="binomial", weights=model_weights)
 yhat.glm <- predict(fit.glm, test, type="response")
-cat("Accuracy of Balanced Model:", 1-InformationValue::misClassError(test$y, yhat.glm))
+cat("Train Accuracy of Balanced Model:", 1-InformationValue::misClassError(train$y, fit.glm$fitted.values), "\n")
+cat("Test Accuracy of Balanced Model:", 1-InformationValue::misClassError(test$y, yhat.glm))
 ```
 
 
 ```{r fig.width=10, fig.height=4}
-p1 <- MyConfusionMatrix(test$y, yhat.glm.unbalanced, title="Logit Unbalanced")
-p2 <- MyConfusionMatrix(test$y, yhat.glm.under, title="Logit UnderSampling")
-p3 <- MyConfusionMatrix(test$y, yhat.glm, title="Logit Weighted")
+p1 <- MyConfusionMatrix(train$y, test$y, fit.glm.unbalanced$fitted.values, yhat.glm.unbalanced, title="Logit Unbalanced")
+p2 <- MyConfusionMatrix(train.under$y, test$y, fit.glm.under$fitted.values, yhat.glm.under, title="Logit UnderSampling")
+p3 <- MyConfusionMatrix(train$y, test$y, fit.glm$fitted.values, yhat.glm, title="Logit Weighted")
 p1+p2+p3
 ```
 
@@ -492,6 +500,7 @@ InformationValue::plotROC(test$y, yhat.glm.under)
 ```
 
 Per avere il modello il più parsimonioso possibile, viene selezionato il training set con undersampling in quanto quello pesato, con un numero di osservazioni di gran lunga superiore, non apporta un apprezzabile incremento di precisione.
+
 ```{r}
 train <- train.under
 ```
@@ -520,8 +529,9 @@ fit.pca <- glm(y~., train.pca, family="binomial")
 
 yhat.pca <- predict(fit.pca, test.pca, type="response")
 
-MyConfusionMatrix(test.pca$y, yhat.pca, title = "Logistic Regression - PCA")
-cat("Accuracy = ", 1-InformationValue::misClassError(test.pca$y, yhat.pca))
+MyConfusionMatrix(train.pca$y, test.pca$y, fit.pca$fitted.values, yhat.pca, title = "Logit - PCA")
+cat("Train Accuracy = ", 1-InformationValue::misClassError(train.pca$y, fit.pca$fitted.values), "\n")
+cat("Test Accuracy = ", 1-InformationValue::misClassError(test.pca$y, yhat.pca))
 ```
 
 ```{r}
@@ -533,7 +543,7 @@ Cerchiamo quindi altri metodi blah blah.
 ### Backward Elimination
 
 ```{r}
-train.tiny <- train %>% slice_sample(n=1e3) %>% ungroup()
+train.tiny <- train %>% slice_sample(n=5e4) %>% ungroup()
 
 fit.glm.tiny <- glm(y~., train.tiny, family="binomial")
 
@@ -541,11 +551,12 @@ glm.backward = step(fit.glm.tiny, direction = "backward", trace=T, k=2)
 
 fit.glm.backward <- glm(glm.backward$formula, train, family = "binomial")
 
-yhat.glm.backward = predict(fit.glm.backward, test)
+yhat.glm.backward = predict(fit.glm.backward, test, type="response")
 
-MyConfusionMatrix(test$y, yhat.glm.backward, title = "Logistic Regression - Backward Elimination")
+MyConfusionMatrix(test$y, yhat.glm.backward, title = "Logit - Backward Elimination")
 
-cat("Accuracy = ", 1-InformationValue::misClassError(test$y, yhat.glm.backward))
+cat("Train Accuracy = ", 1-InformationValue::misClassError(train$y, fit.glm.backward$fitted.values), "\n")
+cat("Test Accuracy = ", 1-InformationValue::misClassError(test$y, yhat.glm.backward))
 ```
 
 ```{r}
@@ -563,11 +574,14 @@ fit.ridge.cv <- cv.glmnet(X.train, train$y, alpha=0, family="binomial", nfolds =
 plot(fit.ridge.cv)
 ```
 
+Perchè abbiamo usato cv.glmnet??? Perchè vogliamo mostrare come la crossvalidation sia nel nostro caso piuttosto inutile, avendo un dataset molto grande i risultati sulle varie folds sono estremamente stabili/simili. Così abbiamo giustificato l'utilizzo del metodo holdout invece della cross-validation.
+
 ```{r}
 X.test <- model.matrix(y~., test)[,-1]
+
 yhat.ridge = predict(fit.ridge.cv, X.test, s = "lambda.1se",  type="response")
 
-MyConfusionMatrix(test$y, yhat.ridge, threshold = 0.5)
+MyConfusionMatrix(test$y, yhat.ridge, threshold = 0.5, title = "Ridge Logit")
 cat("Accuracy = ", 1-InformationValue::misClassError(test$y, yhat.ridge, threshold = 0.5))
 ```
 
@@ -587,7 +601,6 @@ fit.lasso.cv <- cv.glmnet(X.train, train$y, alpha=1, family="binomial", nfolds =
 plot(fit.lasso.cv)
 ```
 
-
 ```{r}
 cat(paste(c("Variables excluded by lasso selection are:", rownames(coef(fit.lasso.cv, s = "lambda.1se"))[(coef(fit.lasso.cv, s = "lambda.1se") == 0)[,1]]), collapse=" \n" ))
 ```
@@ -595,7 +608,7 @@ cat(paste(c("Variables excluded by lasso selection are:", rownames(coef(fit.lass
 ```{r}
 yhat.lasso = predict(fit.lasso.cv, X.test, s = "lambda.1se",  type="response")
 
-MyConfusionMatrix(test$y, yhat.lasso, threshold = 0.5)
+MyConfusionMatrix(test$y, yhat.lasso, threshold = 0.5, title="Lasso Logit")
 cat("Accuracy = ", 1-InformationValue::misClassError(test$y, yhat.lasso, threshold = 0.5))
 ```
 
@@ -603,17 +616,17 @@ cat("Accuracy = ", 1-InformationValue::misClassError(test$y, yhat.lasso, thresho
 InformationValue::plotROC(test$y, yhat.lasso)
 ```
 
-La lasso e' bella
+La lasso e' bella!
 
 # Random Forest
 
 ```{r}
 customTuneRF<- function (data, ntree, model_weights, mtryStart) 
 {
-  data <- data %>% group_by(y) %>% slice_sample(n=4e5) %>% ungroup() 
+  data <- data %>% group_by(y) %>% slice_sample(n=1e5) %>% ungroup() 
   x <- data %>% select(-y)
   y <- data$y
-  tuning_data <- data %>% group_by(y) %>% slice_sample(n=1e5) %>% ungroup()
+  tuning_data <- data %>% group_by(y) %>% slice_sample(n=5e4) %>% ungroup()
   tuning_x <- tuning_data %>% select(-y)
   tuning_y <- tuning_data$y
   class_weights <- unique(model_weights)
@@ -636,14 +649,11 @@ legend("topright", inset=.05,cex = 0.7,
 ```
 
 ```{r}
-importances <- as.data.frame(fit.rf.150t$importance) %>% arrange(-MeanDecreaseAccuracy)
-plot(x = importances$MeanDecreaseAccuracy, y=rownames(importances))
-varImpPlot(fit.rf.150t, type=1, scale=F)
-abline(v=0)
+varImpPlot(fit.rf.150t, type=1, scale=T)
+#abline(v=0, col="red")
 ```
 
-
-
+Controllare presenza variabili che peggiorano e in caso girare nuovo randomforest senza di esse.
 
 ```{r}
 yhat.rf = predict(fit.rf.150t, test %>% select(-y), type="prob", norm.votes=T)
@@ -651,44 +661,12 @@ yhat.rf = predict(fit.rf.150t, test %>% select(-y), type="prob", norm.votes=T)
 MyConfusionMatrix(test$y, yhat.rf[,2], threshold = 0.5)
 
 cat("Accuracy = ", 1-InformationValue::misClassError(test$y, yhat.rf[,2], threshold = 0.5))
-
 ```
 
 ```{r}
 InformationValue::plotROC(test$y, yhat.rf[,2])
 ```
 
-
-```{r}
-set.seed(1000)
-
-fit.rf.caret = train(y ~ ., train %>% group_by(y) %>% slice_sample(n=1e4) %>% ungroup(), method="rf",
-                     ntree = 100,
-                     tuneGrid=expand.grid(.mtry=seq(1, 29, 2)),
-                     trControl = trainControl(method="cv", number = K, search="grid"))
-
-
-plot(fit.rf.caret)
-```
-
-```{r}
-fit.rf.caret2 = train(y ~ ., train %>% group_by(y) %>% slice_sample(n=1e4) %>% ungroup(), method="rf",
-                      ntree = 100,
-                      tuneGrid=expand.grid(.mtry=seq(
-                        fit.rf.caret$bestTune$mtry-2,
-                        fit.rf.caret$bestTune$mtry+2,
-                        1)),
-                      trControl = trainControl(method="repeatedcv", number = K, repeats=3, search="grid"))
-
-plot(fit.rf.caret2)
-```
-
-
-```{r}
-fit.rf.caret.final <- train(y ~ ., train %>% group_by(y) %>% slice_sample(n=1e5) %>% ungroup(), method="rf", ntree = 200,
-               tuneGrid=expand.grid(.mtry=fit.rf.caret2$bestTune$mtry),
-               trControl = trainControl(method="repeatedcv", number = K, repeats=3, search="grid"))
-```
 
 # Survival Analysis
 
