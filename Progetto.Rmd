@@ -3,13 +3,13 @@ title: "Progetto HDDA AA2021/2022"
 output: html_notebook
 ---
 
-
 # Libraries
 
-```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+```{r message=FALSE, warning=FALSE, paged.print=FALSE, include=F}
 if(!require(data.table)) install.packages("data.table")
 if(!require(Hmisc)) install.packages("Hmisc")
 if(!require(dplyr)) install.packages("dplyr")
+if(!require(tidyr)) install.packages("tidyr")
 if(!require(corrplot)) install.packages("corrplot")
 if(!require(lubridate)) install.packages("lubridate")
 if(!require(stringr)) install.packages("stringr")
@@ -27,9 +27,14 @@ if(!require(e1071)) install.packages("e1071")
 if(!require(survival)) install.packages("survival")
 if(!require(survminer)) install_github("kassambara/survminer", build_vignettes = FALSE)
 if(!require(riskRegression)) install.packages("riskRegression")
-if(!require(doParallel)) install.packages("doParallel")
+if(!require(parallel)) install.packages("doParallel")
+if(!require(doMC)) install.packages("doMC")
+if(!require(pander)) install.packages("pander")
+if(!require(patchwork)) install.packages("patchwork")
+
 library(data.table)
 library(Hmisc)
+library(tidyr)
 library(dplyr)
 library(corrplot)
 library(lubridate)
@@ -47,8 +52,70 @@ library(kernlab)
 library(e1071) 
 library(survival)
 library(riskRegression)
-library(doParallel)
+library(parallel)
+library(doMC)
+library(pander)
+library(patchwork)
+
 `%notin%` <- Negate(`%in%`)
+
+registerDoMC(cores = detectCores())
+```
+
+# Useful functions
+
+```{r, include=F}
+piechart <- function(d, group, legend_title = "Outcome"){
+  piepercent <- d %>% 
+    group_by((!!sym(group))) %>% 
+    summarise(n_group = n()) %>% 
+    mutate(n_perc= round( n_group/nrow(d)* 100,2))
+  
+  ggplot(piepercent, aes(x = "", y = n_perc, fill = !!sym(group))) +
+    geom_bar(width = 1, stat = "identity", color = "white") +
+    coord_polar("y", start = 0) +
+    geom_text(aes(label = n_perc), position = position_stack(vjust = 0.5),color = "white")+
+    guides(fill=guide_legend(title=legend_title))+
+    theme_void()
+}
+
+MyConfusionMatrix <- function(actuals,predictions,threshold=0.5, title=""){
+  cm <- caret::confusionMatrix(as.factor(ifelse(predictions>threshold,1,0)), actuals, threshold, dnn=c("Prediction", "Actual"), positive="1", mode="prec_recall")
+  ggplot(as.data.frame(cm$table), aes(Actual, Prediction, fill= Freq)) +
+    geom_tile() + geom_text(aes(label=Freq), fontface="bold") +
+    scale_fill_distiller(palette="Greens",guide="none", direction = 1) +
+    labs(x = "Actual",y = "Prediction", title=title, subtitle=paste("Precision at 0.5 threshold:", round(precision(actuals,predictions,threshold),3)*100,"%")) +
+    scale_x_discrete(labels=c("Default", "Fully Paid")) +
+    scale_y_discrete(labels=c("Fully Paid","Default"), limits=rev) +
+    theme_minimal() + 
+    theme(plot.title = element_text(hjust = 0.5, size = 16),
+          plot.subtitle = element_text(hjust = 0.5, size = 12)) 
+}
+
+plot_precision_vs_npred <- function(actuals, predictions, title=""){
+  p <- vector("list", length(predictions))
+  names(p) <- names(predictions)
+  n <- vector("list", length(predictions))
+  names(n) <- names(predictions)
+  for (i in 1:length(predictions)){
+      for (threshold in seq(0,1,0.05)){
+        p[[i]] <- c(p[[i]],precision(actuals, predictions[[i]], threshold = threshold))
+        n[[i]] <- c(n[[i]],length(predictions[[i]][predictions[[i]] >= threshold]))
+      }
+  }
+  
+  res <- as.data.frame(list(p=p,n=n))
+  res$i <- 1:nrow(res)
+  res <- gather(res,var,val,-i) %>% separate(var, c("variable", "Model")) %>% reshape(idvar = c("i","Model"), timevar = "variable", direction = "wide")
+  names(res)[c(3,4)] <- c("p","n")
+  
+  plotly::plot_ly(res, x=~p*100, y = ~n/length(actuals)*100, type="scatter", mode = "lines+markers", color=~Model, opacity = 1) %>% 
+  plotly::layout(title = "Results",
+                 xaxis = list(title = 'Precision',  ticksuffix = "%"),
+                 yaxis = list(title = 'Number of predicted Fully Paid', ticksuffix = "%"),
+                 legend = list(x=0.8,y=0.9))
+
+}
 ```
 
 # Data Ingestion
@@ -199,7 +266,8 @@ acc <- acc %>%
     term=as.factor(term),
     verification_status=as.factor(verification_status)
   ) %>% 
-  filter(home_ownership %notin% c("ANY", "NONE", "OTHER"))  %>% 
+  filter(home_ownership %notin% c("ANY", "NONE", "OTHER"))  %>%
+  mutate(home_ownership = as.factor(as.character(home_ownership))) %>% # remove empty levels
   select(-loan_status)
 set.seed(1000)
 source("data_preparation/outliers.R", print.eval = T)
@@ -218,9 +286,8 @@ source("data_preparation/plot_osservazioni_e_tempo.R", print.eval = T)
 ### Pie chart default vs fully paid
 
 ```{r}
-source("data_preparation/pie_chart_default_VS_fully_paid.R", print.eval = T)
 piechart(acc,group="y") +
-  scale_fill_manual(labels=c("Fully Paid", "Default"), values=c("darkgreen","darkred"))
+  scale_fill_manual(labels=c("Default", "Fully Paid"), values=c("darkred","darkgreen"))
 ```
 
 ### ROI boxplot/violinplot (for each grade?)
@@ -279,7 +346,6 @@ corrplot::corrplot(cor(acc[,numeric_variables]), method="color", col=col(200),
 knitr::include_graphics(chart_pic_file)
 ```
 
-
 ```{r}
 ids <- sample(c(1:nrow(acc)), 8e4)
 plot(acc[ids,"mo_sin_earliest_cr_line"], acc[ids,"mo_sin_old_rev_tl_op"])
@@ -288,6 +354,8 @@ plot(acc[ids,"mo_sin_earliest_cr_line"], acc[ids,"mo_sin_old_rev_tl_op"])
 ```{r}
 plot(acc[ids, "num_sats"], acc[ids, "open_acc"])
 ```
+
+# Fix Correlation
 
 ```{r}
 ### categorizzazione fico_mean (https://www.investopedia.com/terms/f/ficoscore.asp)
@@ -340,7 +408,7 @@ corrplot(cor(acc[, new_numeric_variables]))
 # Modeling
 
 ```{r}
-model_variables = names(acc)[names(acc) %notin% c(
+model_variables <-  names(acc)[names(acc) %notin% c(
   "grade",
   "funded_amnt",
   "issue_d",
@@ -353,261 +421,272 @@ model_variables = names(acc)[names(acc) %notin% c(
   "mo_sin_old_rev_tl_op"
 )]
 
+model_num_variables <- model_variables[model_variables %in% new_numeric_variables]
+
 model_acc <- acc[,model_variables] %>% relocate(y, .after = last_col())
 
-model_acc[, new_numeric_variables[new_numeric_variables %in% model_variables]] = scale(model_acc[, new_numeric_variables[new_numeric_variables %in% model_variables]])
+model_acc[, model_num_variables] <- scale(model_acc[, model_num_variables])
 
-corrplot(cor(model_acc[, new_numeric_variables[new_numeric_variables %in% model_variables]]))
+corrplot(cor(model_acc[, model_num_variables]))
 ```
-
 
 ```{r}
 set.seed(1000)
-acc.balanced <- model_acc %>% group_by(y) %>% sample_n(min(summary(acc$y))) %>% ungroup()
+train <- sample_frac(model_acc, 0.7)
+test <- anti_join(model_acc,train)
+```
 
-train.balanced = sample_frac(acc.balanced, 0.8)
-test.balanced = anti_join(acc.balanced,train.balanced)
+To deal with class imbalance we define weights so that the model's predictions will be fair to both classes.
+
+```{r}
+model_weights <- ifelse(train$y == "0",
+                        (1/table(train$y)[1]) * 0.5, ### (1 / numero osservazioni classe 0) / 2
+                        (1/table(train$y)[2]) * 0.5) ### (1 / numero osservazioni classe 1) / 2
+# sum(model_weights) == 1 TRUE
+```
+
+## Logistic Regression
+
+### Plain
+
+```{r}
+fit.glm.unbalanced <- glm(y~., train, family="binomial")
+yhat.glm.unbalanced <- predict(fit.glm.unbalanced, test, type="response")
+cat("Accuracy of Unbalanced Model:", 1-InformationValue::misClassError(test$y, yhat.glm.unbalanced))
+```
+
+```{r}
+train.under <- train %>% group_by(y) %>% slice_sample(n=min(table(train$y))) %>% ungroup()
+fit.glm.under <- glm(y~., train.under, family="binomial")
+yhat.glm.under<- predict(fit.glm.under, test, type="response")
+cat("Accuracy of UnderSampling Model:", 1-InformationValue::misClassError(test$y, yhat.glm.under))
+```
+
+```{r}
+fit.glm <- glm(y~., train, family="binomial", weights=model_weights)
+yhat.glm <- predict(fit.glm, test, type="response")
+cat("Accuracy of Balanced Model:", 1-InformationValue::misClassError(test$y, yhat.glm))
+```
+
+
+```{r fig.width=10, fig.height=4}
+p1 <- MyConfusionMatrix(test$y, yhat.glm.unbalanced, title="Logistic Regression Unbalanced")
+p2 <- MyConfusionMatrix(test$y, yhat.glm.under, title="Logistic Regression UnderSampling")
+p3 <- MyConfusionMatrix(test$y, yhat.glm, title="Logistic Regression Balanced")
+p1+p2+p3
+```
+
+L'utilizzo dei pesi ci permette di avere previsioni più bilanciate, al costo di peggiorare l'accuracy totale del nostro modello si riescono ad ottenere previsioni più attendibili sulla classe minoritaria (Default). Si osserva infatti come il modello senza il bilanciamento ha un'accuracy sulla classe Default del 9%, mentre il modello bilanciato arriva al 63%. In conclusione otteniamo una Precision sulla classe Fully Paid più elevata.
+Da qui in avanti verranno prodotti solo modelli bilanciati tramite l'utilizzo dei pesi.
+
+```{r}
+InformationValue::plotROC(test$y, yhat.glm)
+```
+
+### PCA
+
+```{r}
+pca.res <- prcomp(train[, model_num_variables])
+
+plot(x=1:length(pca.res$sdev), y=pca.res$sdev, type="p", col=ifelse(pca.res$sdev>=1,"red","blue") , xlab="# components", ylab="Standard Deviation") # si prendono quelle > 1
+abline(h=1, col="red")
+fviz_eig(pca.res, chioce="eigenvalue")
+```
+
+
+```{r}
+train.pca <- as.data.frame(as.matrix(train[,model_num_variables]) %*% pca.res$rotation)[,1:7] # prime sette variabili
+test.pca <- as.data.frame(as.matrix(test[,model_num_variables]) %*% pca.res$rotation)[,1:7] # prime sette variabili
+
+train.pca$y <- train$y
+test.pca$y <- test$y
+```
+
+```{r}
+fit.pca <- glm(y~., train.pca, family="binomial",  weights=model_weights)
+
+yhat.pca <- predict(fit.pca, test.pca, type="response")
+
+MyConfusionMatrix(test.pca$y, yhat.pca, title = "Logistic Regression - PCA")
+cat("Accuracy = ", 1-InformationValue::misClassError(test.pca$y, yhat.pca))
+```
+
+```{r}
+InformationValue::plotROC(test.pca$y, yhat.pca)
+```
+
+Cerchiamo quindi altri metodi blah blah.
+
+### Backward Elimination
+
+```{r}
+train.tiny <- train %>% slice_sample(n=1e3) %>% ungroup() 
+model_weights.tiny <- ifelse(train.tiny$y == "0",
+                        (1/table(train.tiny$y)[1]) * 0.5, ### (1 / numero osservazioni classe 0) / 2
+                        (1/table(train.tiny$y)[2]) * 0.5) ### (1 / numero osservazioni classe 1) / 2
+
+fit.glm.tiny <- glm(y~int_rate, train.tiny, family="binomial", weights=model_weights.tiny)
+
+glm.backwards = step(fit.glm.tiny, direction = "backward", trace=T, k=2)
+
+fit.glm.backwards <- glm(glm.backward$formula, train, family = "binomial", weights=model_weights)
+
+yhat.glm.backwards = predict(fit.glm.backwards, test)
+
+MyConfusionMatrix(test$y, yhat.glm.backwards, title = "Logistic Regression - Backward Elimination")
+
+cat("Accuracy = ", 1-InformationValue::misClassError(test$y, yhat.glm.backwards))
+```
+
+```{r}
+fit.null.tiny <- glm(y~1, train.tiny, family="binomial", weights=model_weights.tiny)
+glm.forward <- step(fit.null.tiny, direction = "forward", trace=T, k=2)
+
 
 ```
 
 
 ```{r}
-set.seed(1000)
-fit.glm <- glm(y~., train.balanced, family="binomial")
-
-summary(fit.glm)
+InformationValue::plotROC(test$y, yhat.glm.backwards)
 ```
 
-```{r}
-yhat.glm <- predict(fit.glm, test.balanced, type="response")
-
-confusionMatrix(test.balanced$y, yhat.glm)
-```
-
-```{r}
-InformationValue::plotROC(test.balanced$y, yhat.glm)
-```
-```{r}
-confusionMatrix(test.balanced$y, yhat.glm, threshold = 0.8)
-```
-```{r}
-precision(test.balanced$y, yhat.glm, threshold = 0.8)
-```
-
-
-```{r}
-#PCA
-set.seed(1000)
-pca.res <- prcomp(scale(as.matrix(acc[,new_numeric_variables])))
-fviz_eig(pca.res)
-
-print(pca.res$sdev) # si prendono quelle > 1
-```
-
-
-```{r}
-acc_pca <- as.data.frame(scale(as.matrix(acc[,new_numeric_variables])) %*% pca.res$rotation)[,1:8] # prime otto variabili
-acc_pca <- acc_pca %>% cbind(acc%>%select(y))
-```
-
-
-```{r}
-set.seed(1000)
-acc.balanced.pca <- acc_pca %>% group_by(y) %>% sample_n(min(summary(acc_pca$y))) %>% ungroup()
-
-train.balanced.pca <- sample_frac(acc.balanced.pca, 0.8)
-test.balanced.pca <- anti_join(acc.balanced.pca,train.balanced.pca)
-
-fit.pca <- glm(y~., train.balanced.pca, family="binomial")
-
-yhat.pca <- predict(fit.pca, test.balanced.pca, type="response")
-
-ytest.pca = test.balanced.pca$y
-
-confusionMatrix(ytest.pca, yhat.pca)
-```
-```{r}
-precision(ytest.pca, yhat.pca, threshold=0.8)
-```
-
-
-```{r}
-InformationValue::plotROC(ytest.pca, yhat.pca)
-```
-Cerchiamo quindi altri metodi blah vlah
-
-## Best Subset Selection (BSS)
-
-```{r}
-set.seed(1000)
-fit.glm.backwards = step(fit.glm, direction = "backward", trace=T)
-
-yhat.glm.backwards = predict(fit.glm.backwards, test.balanced %>% select(-y))
-
-InformationValue::plotROC(test.balanced$y, yhat.glm.backwards)
-```
-
-```{r}
-precision(test.balanced$y, yhat.glm.backwards)
-```
 Backward e' troppo pesante, cerchiamo altri metodi
 
-## Ridge
+### Ridge
 
 ```{r}
-set.seed(1000)
-
-Xlm.train <- model.matrix(fit.glm)[,-1]
-fit.ridge <- glmnet(Xlm.train, train.balanced$y, alpha = 0, family="binomial", nlambda = 100)    # alpha=0: ridge
-plot(fit.ridge, xvar="lambda")
-```
-
-
-```{r}
-set.seed(1000)
+X.train <- model.matrix(y~., train)[,-1]
 K <- 10
-fit.ridge.cv <- cv.glmnet(Xlm.train, train.balanced$y, alpha=0, nfolds = K, grouped = FALSE, family="binomial")
-
+fit.ridge.cv <- cv.glmnet(X.train, train$y, weights= model_weights , alpha=0, family="binomial", nfolds = K, grouped = FALSE, type.measure = "class", parallel = T)
 plot(fit.ridge.cv)
 ```
 
 ```{r}
-Xlm.test = model.matrix(glm(y ~ ., test.balanced, family = "binomial"))[,-1]
+X.test <- model.matrix(y~., test)[,-1]
+yhat.ridge = predict(fit.ridge.cv, X.test, s = "lambda.1se",  type="response")
 
-yhat.ridge.cv.1se = predict(fit.ridge.cv$glmnet.fit, Xlm.test, s = "lambda.1se")
-
-confusionMatrix(test.balanced$y, yhat.ridge.cv.1se, threshold = 0.8)
+MyConfusionMatrix(test$y, yhat.ridge, threshold = 0.5)
+cat("Accuracy = ", 1-InformationValue::misClassError(test$y, yhat.ridge, threshold = 0.5))
 ```
 
 
 ```{r}
-InformationValue::plotROC(test.balanced$y, yhat.ridge.cv.1se)
+InformationValue::plotROC(test$y, yhat.ridge)
 ```
 
+Commento.
+Grafico confronto coefficienti.
+
+### Lasso
 
 ```{r}
-precision(test.balanced$y, yhat.ridge.cv.1se, threshold = 0.8)
-```
-
-## Lasso
-```{r}
-set.seed(1000)
 K <- 10
-fit.lasso.cv <- cv.glmnet(Xlm, train.balanced$y, alpha=1, nfolds = K, grouped = FALSE, family="binomial")
+fit.lasso.cv <- cv.glmnet(X.train, train$y, weights=model_weights, alpha=1, family="binomial", nfolds = K, grouped = FALSE, type.measure = "class", parallel = T)
 plot(fit.lasso.cv)
 ```
 
 
 ```{r}
-coef(fit.lasso.cv)
+cat(paste(c("Variables excluded by lasso selection are:", rownames(coef(fit.lasso.cv, s = "lambda.1se"))[(coef(fit.lasso.cv, s = "lambda.1se") == 0)[,1]]), collapse=" \n" ))
 ```
 
 ```{r}
-set.seed(1000)
-yhat.lasso.cv.1se <- predict(fit.lasso.cv, Xlm.test, s = "lambda.1se")
-confusionMatrix(
-  test.balanced$y,
-  yhat.lasso.cv.1se,
-  threshold = 0.8)
+yhat.lasso = predict(fit.lasso.cv, X.test, s = "lambda.1se",  type="response")
+
+MyConfusionMatrix(test$y, yhat.lasso, threshold = 0.5)
+cat("Accuracy = ", 1-InformationValue::misClassError(test$y, yhat.lasso, threshold = 0.5))
 ```
 
 ```{r}
-InformationValue::plotROC(test.balanced$y, yhat.lasso.cv.1se)
+InformationValue::plotROC(test$y, yhat.lasso)
 ```
-
-```{r}
-precision(test.balanced$y, yhat.lasso.cv.1se, threshold = 0.8)
-```
-
 
 La lasso e' bella
 
 # Random Forest
 
 ```{r}
-customTuneRF = function (x, y, ntree) 
+customTuneRF<- function (data, ntree, model_weights, mtryStart) 
 {
-  e = tuneRF(x, y, trace=T)
-  
-  randomForest(x, y, mtry=e[which.min(e[, 
-      2]), 1], ntree=ntree, importance=T)
+  data <- data %>% group_by(y) %>% slice_sample(n=4e5) %>% ungroup() 
+  x <- data %>% select(-y)
+  y <- data$y
+  tuning_data <- data %>% group_by(y) %>% slice_sample(n=1e5) %>% ungroup()
+  tuning_x <- tuning_data %>% select(-y)
+  tuning_y <- tuning_data$y
+  class_weights <- unique(model_weights)
+  class_weights <- c("0" = max(class_weights), "1" = min(class_weights))
+  tune <- tuneRF(tuning_x, tuning_y, trace=T, strata=tuning_y, classwt=class_weights, mtryStart=mtryStart)
+  print("Tuning is over!")
+  randomForest(x, y, mtry=tune[which.min(tune[, 
+      2]), 1], ntree=ntree, strata=y, classwt=class_weights, importance=T, do.trace=T)
 }
 ```
 
+```{r}
+fit.rf.150t = customTuneRF(train, ntree=150, model_weights, mtryStart=7)
+```
+
+```{r}
+plot(fit.rf.150t, lty=c(1,2,3))
+legend("topright", inset=.05,cex = 0.7, 
+  c("OOB Mean","OOB Default","OOB Fully paid"), col=c("black", "red", "green"), lwd=2, lty=c(1,2,3), horiz=TRUE)
+```
+
+```{r}
+importances <- as.data.frame(fit.rf.150t$importance) %>% arrange(-MeanDecreaseAccuracy)
+plot(x = importances$MeanDecreaseAccuracy, y=rownames(importances))
+varImpPlot(fit.rf.150t, type=1, scale=F)
+abline(v=0)
+```
+
+
+
+
+```{r}
+yhat.rf = predict(fit.rf.150t, test %>% select(-y), type="prob", norm.votes=T)
+
+MyConfusionMatrix(test$y, yhat.rf[,2], threshold = 0.5)
+
+cat("Accuracy = ", 1-InformationValue::misClassError(test$y, yhat.rf[,2], threshold = 0.5))
+
+```
+
+```{r}
+InformationValue::plotROC(test$y, yhat.rf[,2])
+```
+
 
 ```{r}
 set.seed(1000)
 
-acc.balanced.tiny <- model_acc %>% group_by(y) %>% sample_n(10000) %>% ungroup()
+fit.rf.caret = train(y ~ ., train %>% group_by(y) %>% slice_sample(n=1e4) %>% ungroup(), method="rf",
+                     ntree = 100,
+                     tuneGrid=expand.grid(.mtry=seq(1, 29, 2)),
+                     trControl = trainControl(method="cv", number = K, search="grid"))
 
-train.balanced.tiny = sample_frac(acc.balanced.tiny, 0.8)
-test.balanced.tiny = anti_join(acc.balanced.tiny, train.balanced.tiny)
 
-set.seed(1000)
-fit.rf.bestMtry.500t = customTuneRF(train.balanced.tiny %>% select(-y), train.balanced.tiny$y, ntree=500)
+plot(fit.rf.caret)
+```
+
+```{r}
+fit.rf.caret2 = train(y ~ ., train %>% group_by(y) %>% slice_sample(n=1e4) %>% ungroup(), method="rf",
+                      ntree = 100,
+                      tuneGrid=expand.grid(.mtry=seq(
+                        fit.rf.caret$bestTune$mtry-2,
+                        fit.rf.caret$bestTune$mtry+2,
+                        1)),
+                      trControl = trainControl(method="repeatedcv", number = K, repeats=3, search="grid"))
+
+plot(fit.rf.caret2)
 ```
 
 
 ```{r}
-varImpPlot(fit.rf.bestMtry.500t, type=1)
+fit.rf.caret.final <- train(y ~ ., train %>% group_by(y) %>% slice_sample(n=1e5) %>% ungroup(), method="rf", ntree = 200,
+               tuneGrid=expand.grid(.mtry=fit.rf.caret2$bestTune$mtry),
+               trControl = trainControl(method="repeatedcv", number = K, repeats=3, search="grid"))
 ```
-
-```{r}
-plot(fit.rf.bestMtry.500t)
-```
-
-
-```{r}
-set.seed(1000)
-fit.rf.bestMtry.250t = customTuneRF(train.balanced.tiny %>% select(-y), train.balanced.tiny$y, ntree=250)
-```
-
-
-```{r}
-varImpPlot(fit.rf.bestMtry.250t, type=1)
-```
-
-
-```{r}
-plot(fit.rf.bestMtry.250t)
-```
-```{r fig.width=20, fig.height=12}
-par(mfrow=c(1, 2))
-plot(fit.rf.bestMtry.500t)
-plot(fit.rf.bestMtry.250t)
-```
-
-
-```{r}
-yhat.rf = predict(fit.rf.bestMtry, test.balanced.tiny %>% select(-y), type="prob", norm.votes=T)
-
-InformationValue::confusionMatrix(test.balanced.tiny$y, yhat.rf[,2], threshold = 0.8)
-```
-
-
-```{r}
-InformationValue::plotROC(test.balanced.tiny$y, yhat.rf[,2])
-```
-
-```{r}
-precision(test.balanced.tiny$y, yhat.rf[,2], threshold = 0.8)
-```
-
-```{r}
-set.seed(1000)
-
-cluster = makePSOCKcluster(8)
-registerDoParallel(cluster)
-fit.rf.100trees = train(y ~ ., train.balanced.tiny, method="rf", ntree = 100,
-               tuneGrid=expand.grid(.mtry=seq(1, 29, 2)),
-               trControl = trainControl(method="cv", number = K, search="grid"))
-fit.rf.1000trees = train(y ~ ., train.balanced.tiny, method="rf", ntree = 1000,
-               tuneGrid=expand.grid(.mtry=seq(1, 29, 2)),
-               trControl = trainControl(method="cv", number = K, search="grid"))
-stopCluster(cluster)
-plot(fit.rf)
-```
-
 
 # Survival Analysis
 
@@ -745,13 +824,10 @@ library(future)
 library(foreach)
 library(doFuture)
 library(survival)
-#plan(multiprocess, workers = availableCores())
-registerDoFuture()
-options(future.globals.maxSize= 2000*1024^2)
 ```
 
 ```{r}
-#train.surv <- ...
+# train.surv <- ...
 model_base <- coxph(model$formula, data = acc_surv %>% select(-addr_state,-home_ownership), x = T,y=T)
 
 model_aug <- coxph(Surv(actual_duration_to_term, status) ~ ., data = acc_surv %>% select(-addr_state,-home_ownership), x = T,y=T)
@@ -775,16 +851,12 @@ CVscore <- Score(list("Base model"=model_base,"Augmented Model"=model_aug),
               progress.bar=1)
 ```
 
-```{r}
-acc_surv
-```
-
 Si decide di prendere il time-point a metà del termine e si valutano le performance dei modelli sui tre aspetti: calibrazione, discriminazione, net benefit.
 
 Per valutare la calibrazione dei modelli si usano insieme il Calibration Plot e il Brier Score.
 
 ```{r}
-plotCalibration(score,times=0.5, cens.method="local",method="quantile", q=20, auc.in.legend = F, xlim = c(0,0.40),ylim=c(0,0.40))
+plotCalibration(score,times=0.5, cens.method="local",method="quantile", q=20, auc.in.legend = F)
 title(main="Calibration at half term")
 
 plotCalibration(CVscore,times=5,cens.method="local",method="quantile",q=10, auc.in.legend = F)
@@ -798,11 +870,9 @@ plotROC(score,times=0.5,cens.method="local")
 title(main="time-dependent ROC at half term")
 ```
 
-
 ```{r}
 CVscore$AUC$score %>% filter(times == 0.5, model %in% c("Base Model", "Augmented Model")) %>% mutate(C.I = paste0("[", round(lower, 2), ",", round(upper,2), "]")) %>% select(model, AUC, C.I) %>% pander()
 ```
-
 
 ### Net Benefit
 
@@ -849,3 +919,24 @@ legend('topright', c("Base Model","Augmented Model"), lwd = c(3, 3), lty = c(1, 
 
 
 # Conclusions
+
+
+```{r}
+score <- Score(list("LogReg"=fit.glm,
+                    "LogReg PCA"=fit.pca,
+                    "LogRidge"=fit.ridge.cv,
+                    "LogRegLasso"=fit.lasso.cv,
+                    "RandFor"=fit.rf.150t),
+              formula=y~1,
+              data=test, conf.int=F,
+              plots=c("calibration","ROC"),
+              progress.bar=1)
+
+```
+
+
+```{r fig.height=6, fig.width=10}
+plot_precision_vs_npred(test$y, list("glm"=yhat.glm, "pca"=yhat.pca, "ridge"=yhat.ridge, "lasso"=yhat.lasso,"RandomForest"=yhat.rf[,2]), title = "Results")
+```
+
+
