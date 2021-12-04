@@ -56,10 +56,13 @@ library(parallel)
 library(doMC)
 library(pander)
 library(patchwork)
+library(car)
 
 `%notin%` <- Negate(`%in%`)
 
 registerDoMC(cores = detectCores())
+#cl = makePSOCKcluster(detectCores())
+#registerDoParallel(cl)
 ```
 
 # Useful functions
@@ -451,6 +454,11 @@ model_weights <- ifelse(train$y == "0",
 
 ```{r}
 fit.glm.unbalanced <- glm(y~., train, family="binomial")
+vif(fit.glm.unbalanced)
+```
+
+
+```{r}
 yhat.glm.unbalanced <- predict(fit.glm.unbalanced, test, type="response")
 cat("Accuracy of Unbalanced Model:", 1-InformationValue::misClassError(test$y, yhat.glm.unbalanced))
 ```
@@ -470,9 +478,9 @@ cat("Accuracy of Balanced Model:", 1-InformationValue::misClassError(test$y, yha
 
 
 ```{r fig.width=10, fig.height=4}
-p1 <- MyConfusionMatrix(test$y, yhat.glm.unbalanced, title="Logistic Regression Unbalanced")
-p2 <- MyConfusionMatrix(test$y, yhat.glm.under, title="Logistic Regression UnderSampling")
-p3 <- MyConfusionMatrix(test$y, yhat.glm, title="Logistic Regression Balanced")
+p1 <- MyConfusionMatrix(test$y, yhat.glm.unbalanced, title="Logit Unbalanced")
+p2 <- MyConfusionMatrix(test$y, yhat.glm.under, title="Logit UnderSampling")
+p3 <- MyConfusionMatrix(test$y, yhat.glm, title="Logit Weighted")
 p1+p2+p3
 ```
 
@@ -480,7 +488,12 @@ L'utilizzo dei pesi ci permette di avere previsioni più bilanciate, al costo di
 Da qui in avanti verranno prodotti solo modelli bilanciati tramite l'utilizzo dei pesi.
 
 ```{r}
-InformationValue::plotROC(test$y, yhat.glm)
+InformationValue::plotROC(test$y, yhat.glm.under)
+```
+
+Per avere il modello il più parsimonioso possibile, viene selezionato il training set con undersampling in quanto quello pesato, con un numero di osservazioni di gran lunga superiore, non apporta un apprezzabile incremento di precisione.
+```{r}
+train <- train.under
 ```
 
 ### PCA
@@ -503,7 +516,7 @@ test.pca$y <- test$y
 ```
 
 ```{r}
-fit.pca <- glm(y~., train.pca, family="binomial",  weights=model_weights)
+fit.pca <- glm(y~., train.pca, family="binomial")
 
 yhat.pca <- predict(fit.pca, test.pca, type="response")
 
@@ -520,34 +533,23 @@ Cerchiamo quindi altri metodi blah blah.
 ### Backward Elimination
 
 ```{r}
-train.tiny <- train %>% slice_sample(n=1e3) %>% ungroup() 
-model_weights.tiny <- ifelse(train.tiny$y == "0",
-                        (1/table(train.tiny$y)[1]) * 0.5, ### (1 / numero osservazioni classe 0) / 2
-                        (1/table(train.tiny$y)[2]) * 0.5) ### (1 / numero osservazioni classe 1) / 2
+train.tiny <- train %>% slice_sample(n=1e3) %>% ungroup()
 
-fit.glm.tiny <- glm(y~int_rate, train.tiny, family="binomial", weights=model_weights.tiny)
+fit.glm.tiny <- glm(y~., train.tiny, family="binomial")
 
-glm.backwards = step(fit.glm.tiny, direction = "backward", trace=T, k=2)
+glm.backward = step(fit.glm.tiny, direction = "backward", trace=T, k=2)
 
-fit.glm.backwards <- glm(glm.backward$formula, train, family = "binomial", weights=model_weights)
+fit.glm.backward <- glm(glm.backward$formula, train, family = "binomial")
 
-yhat.glm.backwards = predict(fit.glm.backwards, test)
+yhat.glm.backward = predict(fit.glm.backward, test)
 
-MyConfusionMatrix(test$y, yhat.glm.backwards, title = "Logistic Regression - Backward Elimination")
+MyConfusionMatrix(test$y, yhat.glm.backward, title = "Logistic Regression - Backward Elimination")
 
-cat("Accuracy = ", 1-InformationValue::misClassError(test$y, yhat.glm.backwards))
+cat("Accuracy = ", 1-InformationValue::misClassError(test$y, yhat.glm.backward))
 ```
 
 ```{r}
-fit.null.tiny <- glm(y~1, train.tiny, family="binomial", weights=model_weights.tiny)
-glm.forward <- step(fit.null.tiny, direction = "forward", trace=T, k=2)
-
-
-```
-
-
-```{r}
-InformationValue::plotROC(test$y, yhat.glm.backwards)
+InformationValue::plotROC(test$y, yhat.glm.backward)
 ```
 
 Backward e' troppo pesante, cerchiamo altri metodi
@@ -557,7 +559,7 @@ Backward e' troppo pesante, cerchiamo altri metodi
 ```{r}
 X.train <- model.matrix(y~., train)[,-1]
 K <- 10
-fit.ridge.cv <- cv.glmnet(X.train, train$y, weights= model_weights , alpha=0, family="binomial", nfolds = K, grouped = FALSE, type.measure = "class", parallel = T)
+fit.ridge.cv <- cv.glmnet(X.train, train$y, alpha=0, family="binomial", nfolds = K, grouped = FALSE, type.measure = "class", parallel = T)
 plot(fit.ridge.cv)
 ```
 
@@ -581,7 +583,7 @@ Grafico confronto coefficienti.
 
 ```{r}
 K <- 10
-fit.lasso.cv <- cv.glmnet(X.train, train$y, weights=model_weights, alpha=1, family="binomial", nfolds = K, grouped = FALSE, type.measure = "class", parallel = T)
+fit.lasso.cv <- cv.glmnet(X.train, train$y, alpha=1, family="binomial", nfolds = K, grouped = FALSE, type.measure = "class", parallel = T)
 plot(fit.lasso.cv)
 ```
 
@@ -938,5 +940,10 @@ score <- Score(list("LogReg"=fit.glm,
 ```{r fig.height=6, fig.width=10}
 plot_precision_vs_npred(test$y, list("glm"=yhat.glm, "pca"=yhat.pca, "ridge"=yhat.ridge, "lasso"=yhat.lasso,"RandomForest"=yhat.rf[,2]), title = "Results")
 ```
+
+```{r}
+stopCluster(cl)
+```
+
 
 
