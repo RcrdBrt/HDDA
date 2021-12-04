@@ -7,8 +7,11 @@ output: html_notebook
 
 ```{r message=FALSE, warning=FALSE, paged.print=FALSE, include=F}
 if(!require(data.table)) install.packages("data.table")
+if(!require(tibble)) install.packages("tibble")
 if(!require(Hmisc)) install.packages("Hmisc")
 if(!require(dplyr)) install.packages("dplyr")
+if(!require(ggplot2)) install.packages("ggplot2")
+if(!require(scales)) install.packages("scales")
 if(!require(tidyr)) install.packages("tidyr")
 if(!require(corrplot)) install.packages("corrplot")
 if(!require(lubridate)) install.packages("lubridate")
@@ -29,13 +32,14 @@ if(!require(survminer)) install_github("kassambara/survminer", build_vignettes =
 if(!require(riskRegression)) install.packages("riskRegression")
 if(!require(parallel)) install.packages("doParallel")
 if(!require(doMC)) install.packages("doMC")
-if(!require(pander)) install.packages("pander")
 if(!require(patchwork)) install.packages("patchwork")
 
 library(data.table)
+library(tibble)
 library(Hmisc)
 library(tidyr)
 library(dplyr)
+library(ggplot2)
 library(corrplot)
 library(lubridate)
 library(stringr)
@@ -285,10 +289,36 @@ Possiamo pensare di utilizzare anche i Current tipo con 90% già ripagato. Ma ci
 
 # Data Exploration
 
-### numero di osservazioni / tempo
+### Numero di osservazioni / tempo
 
 ```{r, fig.width=10, fig.height=6}
-source("data_preparation/plot_osservazioni_e_tempo.R", print.eval = T)
+month_summary_with_current <- 
+  acc_with_current %>% 
+  group_by(issue_d) %>% 
+  summarise(n_current= n())
+
+month_summary <- 
+  acc %>% 
+  group_by(issue_d) %>% 
+  summarise(n = n())
+
+month_summary_full <- 
+  acc_full %>% 
+  mutate(issue_d = lubridate::my(issue_d)) %>%
+  group_by(issue_d) %>% 
+  summarise(n_full= n()) %>%
+  left_join(month_summary_with_current) %>%
+  left_join(month_summary) 
+
+plotly::plot_ly(month_summary_full, x = ~issue_d) %>% 
+  plotly::add_trace(y = ~n_full, mode = "lines+markers", name = "All", opacity = 0.2) %>%
+  plotly::add_trace(y = ~n_current, mode = "lines+markers", name = "No Missing Values", opacity = 0.5) %>%
+  plotly::add_trace(y = ~n, mode = "lines+markers", name = "No Missing Values and No Current", opacity = 1) %>%
+  plotly::layout(title = "Crescita di LendingClub",  xaxis = list(title = 'Data'),
+                 yaxis = list(title = 'Numero prestiti finanziati'),
+                 legend = list(x=0.1,y=0.9))
+rm(acc_full)
+rm(acc_with_current)
 ```
 
 ### Pie chart default vs fully paid
@@ -354,14 +384,6 @@ corrplot::corrplot(cor(acc[,numeric_variables]), method="color", col=col(200),
 knitr::include_graphics(chart_pic_file)
 ```
 
-```{r}
-ids <- sample(c(1:nrow(acc)), 8e4)
-plot(acc[ids,"mo_sin_earliest_cr_line"], acc[ids,"mo_sin_old_rev_tl_op"])
-```
-
-```{r}
-plot(acc[ids, "num_sats"], acc[ids, "open_acc"])
-```
 
 # Fix Correlation
 
@@ -459,36 +481,29 @@ model_weights <- ifelse(train$y == "0",
 
 ```{r}
 fit.glm.unbalanced <- glm(y~., train, family="binomial")
-vif(fit.glm.unbalanced)
-```
-
-
-```{r}
+#vif(fit.glm.unbalanced)
 yhat.glm.unbalanced <- predict(fit.glm.unbalanced, test, type="response")
-cat("Train Accuracy of Unbalanced Model:", 1-InformationValue::misClassError(train$y, fit.glm.unbalanced$fitted.values), "\n")
-cat("Test Accuracy of Unbalanced Model:", 1-InformationValue::misClassError(test$y, yhat.glm.unbalanced))
+cat("Accuracy of Unbalanced Model:", 1-misClassError(test$y, yhat.glm.unbalanced))
 ```
 
 ```{r}
 train.under <- train %>% group_by(y) %>% slice_sample(n=min(table(train$y))) %>% ungroup()
 fit.glm.under <- glm(y~., train.under, family="binomial")
 yhat.glm.under<- predict(fit.glm.under, test, type="response")
-cat("Train Accuracy of UnderSampling Model:", 1-InformationValue::misClassError(train.under$y, fit.glm.under$fitted.values), "\n")
-cat("Test Accuracy of UnderSampling Model:", 1-InformationValue::misClassError(test$y, yhat.glm.under))
+cat("Accuracy of UnderSampling Model:", 1-misClassError(test$y, yhat.glm.under))
 ```
 
 ```{r}
 fit.glm <- glm(y~., train, family="binomial", weights=model_weights)
 yhat.glm <- predict(fit.glm, test, type="response")
-cat("Train Accuracy of Balanced Model:", 1-InformationValue::misClassError(train$y, fit.glm$fitted.values), "\n")
-cat("Test Accuracy of Balanced Model:", 1-InformationValue::misClassError(test$y, yhat.glm))
+cat("Accuracy of Balanced Model:", 1-misClassError(test$y, yhat.glm))
 ```
 
 
 ```{r fig.width=10, fig.height=4}
-p1 <- MyConfusionMatrix(train$y, test$y, fit.glm.unbalanced$fitted.values, yhat.glm.unbalanced, title="Logit Unbalanced")
-p2 <- MyConfusionMatrix(train.under$y, test$y, fit.glm.under$fitted.values, yhat.glm.under, title="Logit UnderSampling")
-p3 <- MyConfusionMatrix(train$y, test$y, fit.glm$fitted.values, yhat.glm, title="Logit Weighted")
+p1 <- MyConfusionMatrix(test$y, yhat.glm.unbalanced, title="Logit Unbalanced")
+p2 <- MyConfusionMatrix(test$y, yhat.glm.under, title="Logit UnderSampling")
+p3 <- MyConfusionMatrix(test$y, yhat.glm, title="Logit Weighted")
 p1+p2+p3
 ```
 
@@ -510,9 +525,20 @@ train <- train.under
 ```{r}
 pca.res <- prcomp(train[, model_num_variables])
 
-plot(x=1:length(pca.res$sdev), y=pca.res$sdev, type="p", col=ifelse(pca.res$sdev>=1,"red","blue") , xlab="# components", ylab="Standard Deviation") # si prendono quelle > 1
+plot(x=1:length(pca.res$sdev), y=pca.res$sdev, type="p", col=ifelse(pca.res$sdev>=1,"red","blue") , xlab="Component", ylab="Standard Deviation") # si prendono quelle > 1
 abline(h=1, col="red")
-fviz_eig(pca.res, chioce="eigenvalue")
+
+p1 <- ggplot()+
+  geom_point(aes(x=1:length(pca.res$sdev), y=pca.res$sdev, col=pca.res$sdev<1)) +
+  geom_line(aes(x=1:length(pca.res$sdev),y=1), color="red") + 
+  geom_text(aes(x=1:length(pca.res$sdev), y=pca.res$sdev+0.1, label=1:length(pca.res$sdev))) +
+  scale_color_manual(values = c("red", "blue"), guide="none") +
+  labs(x="Component", y="Standard Deviation", title = "PCA components") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, size = 16))
+
+p2 <- fviz_eig(pca.res, chioce="eigenvalue", ggtheme = theme_minimal() + theme(plot.title = element_text(hjust = 0.5, size = 16)))
+p1+p2
 ```
 
 
@@ -529,9 +555,9 @@ fit.pca <- glm(y~., train.pca, family="binomial")
 
 yhat.pca <- predict(fit.pca, test.pca, type="response")
 
-MyConfusionMatrix(train.pca$y, test.pca$y, fit.pca$fitted.values, yhat.pca, title = "Logit - PCA")
-cat("Train Accuracy = ", 1-InformationValue::misClassError(train.pca$y, fit.pca$fitted.values), "\n")
-cat("Test Accuracy = ", 1-InformationValue::misClassError(test.pca$y, yhat.pca))
+MyConfusionMatrix(test.pca$y, yhat.pca, title = "Logit - PCA")
+
+cat("Accuracy = ", 1-misClassError(test.pca$y, yhat.pca))
 ```
 
 ```{r}
@@ -543,11 +569,11 @@ Cerchiamo quindi altri metodi blah blah.
 ### Backward Elimination
 
 ```{r}
-train.tiny <- train %>% slice_sample(n=5e4) %>% ungroup()
+#train.tiny <- train %>% slice_sample(n=5e4) %>% ungroup()
 
-fit.glm.tiny <- glm(y~., train.tiny, family="binomial")
+fit.glm <- glm(y~., train, family="binomial")
 
-glm.backward = step(fit.glm.tiny, direction = "backward", trace=T, k=2)
+glm.backward = step(fit.glm, direction = "backward", trace=T, k=2)
 
 fit.glm.backward <- glm(glm.backward$formula, train, family = "binomial")
 
@@ -555,8 +581,7 @@ yhat.glm.backward = predict(fit.glm.backward, test, type="response")
 
 MyConfusionMatrix(test$y, yhat.glm.backward, title = "Logit - Backward Elimination")
 
-cat("Train Accuracy = ", 1-InformationValue::misClassError(train$y, fit.glm.backward$fitted.values), "\n")
-cat("Test Accuracy = ", 1-InformationValue::misClassError(test$y, yhat.glm.backward))
+cat("Accuracy = ", 1-misClassError(test$y, yhat.glm.backward))
 ```
 
 ```{r}
@@ -582,7 +607,7 @@ X.test <- model.matrix(y~., test)[,-1]
 yhat.ridge = predict(fit.ridge.cv, X.test, s = "lambda.1se",  type="response")
 
 MyConfusionMatrix(test$y, yhat.ridge, threshold = 0.5, title = "Ridge Logit")
-cat("Accuracy = ", 1-InformationValue::misClassError(test$y, yhat.ridge, threshold = 0.5))
+cat("Accuracy = ", 1-misClassError(test$y, yhat.ridge, threshold = 0.5))
 ```
 
 
@@ -592,6 +617,30 @@ InformationValue::plotROC(test$y, yhat.ridge)
 
 Commento.
 Grafico confronto coefficienti.
+
+Possiamo verificare ulteriormente quanto detto circa la cross-validation.
+
+```{r eval=FALSE, include=FALSE}
+K <- 10
+folds <- sample(rep(1:K, length=nrow(train)))
+
+accs <- c()
+precs <- c()
+
+for(k in 1:K){
+  fit <- glm(y ~ ., train[which(folds!=k),], family="binomial")
+  x.out=train[which(folds==k),] %>% select(-y) ### lascio fuori la "cartella" k-esima per la fase di training
+  yhat.cv=predict(fit, x.out, type="response") ### predico sulla "cartella" k-esima
+  y.out=train$y[which(folds==k)]
+  accs[k] <- 1-misClassError(y.out, yhat.cv, threshold = 0.5)
+  precs[k] <- precision(y.out, yhat.cv, threshold = 0.5)
+  print(k)
+}
+
+boxplot(accs,ylim=c(0,1))
+boxplot(precs,ylim=c(0,1))
+
+```
 
 ### Lasso
 
@@ -609,7 +658,7 @@ cat(paste(c("Variables excluded by lasso selection are:", rownames(coef(fit.lass
 yhat.lasso = predict(fit.lasso.cv, X.test, s = "lambda.1se",  type="response")
 
 MyConfusionMatrix(test$y, yhat.lasso, threshold = 0.5, title="Lasso Logit")
-cat("Accuracy = ", 1-InformationValue::misClassError(test$y, yhat.lasso, threshold = 0.5))
+cat("Accuracy = ", 1-misClassError(test$y, yhat.lasso, threshold = 0.5))
 ```
 
 ```{r}
@@ -618,7 +667,7 @@ InformationValue::plotROC(test$y, yhat.lasso)
 
 La lasso e' bella!
 
-# Random Forest
+## Random Forest
 
 ```{r}
 customTuneRF<- function (data, ntree, model_weights, mtryStart) 
@@ -643,32 +692,50 @@ fit.rf.150t = customTuneRF(train, ntree=150, model_weights, mtryStart=7)
 ```
 
 ```{r}
-plot(fit.rf.150t, lty=c(1,2,3))
-legend("topright", inset=.05,cex = 0.7, 
-  c("OOB Mean","OOB Default","OOB Fully paid"), col=c("black", "red", "green"), lwd=2, lty=c(1,2,3), horiz=TRUE)
+fit.rf.150t$err.rate %>%
+  as.data.frame() %>%
+  cbind(ntrees=seq(1,nrow(fit.rf.150t$err.rate))) %>%
+  rename("Default" = "0", "FullyPaid" = "1", "Overall" = "OOB") %>%
+  gather(Error, Value, -ntrees) %>%
+  ggplot() +
+  geom_line(aes(x=ntrees,y= Value, col=Error)) +
+  scale_y_continuous(labels = scales::percent) +
+  scale_color_manual(values = c("darkred", "darkgreen", "black")) + 
+  labs(x = "# Trees", y = "OOB Error", title = "Random Forest Progression") + 
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, size = 16))
 ```
 
 ```{r}
-varImpPlot(fit.rf.150t, type=1, scale=T)
-#abline(v=0, col="red")
+fit.rf.150t$importance %>%
+  cbind("Variable"=rownames(fit.rf.150t$importance)) %>%
+  as.data.frame() %>%
+  mutate(MeanDecreaseAccuracy = as.numeric(as.character(MeanDecreaseAccuracy))) %>%
+  ggplot() +
+  geom_point(aes(x=MeanDecreaseAccuracy, y = reorder(Variable, MeanDecreaseAccuracy), col = MeanDecreaseAccuracy > 0)) +
+  scale_color_manual(values=c("red", "black"), guide="none") +
+  scale_x_continuous(labels=scales::percent) +
+  labs(x= "Mean Decrease Accuracy", y = "", title = "Variables Importance in Random Forest", subtitle = paste("Overall Training Accuracy =", 1-misClassError(fit.rf.150t$y, as.numeric(as.character(fit.rf.150t$predicted)),0.5) )) + 
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, size = 16),
+        plot.subtitle = element_text(hjust=0.5,size=12))
 ```
 
-Controllare presenza variabili che peggiorano e in caso girare nuovo randomforest senza di esse.
+application_type e tax_liens aumentano l'accuracy quando non sono presenti negli alberi, tuttavia la differenza è minima, per cui non vale la pena girare un nuovo modello escludendole.
 
 ```{r}
 yhat.rf = predict(fit.rf.150t, test %>% select(-y), type="prob", norm.votes=T)
 
 MyConfusionMatrix(test$y, yhat.rf[,2], threshold = 0.5)
 
-cat("Accuracy = ", 1-InformationValue::misClassError(test$y, yhat.rf[,2], threshold = 0.5))
+cat("Accuracy = ", 1-misClassError(test$y, yhat.rf[,2], threshold = 0.5))
 ```
 
 ```{r}
 InformationValue::plotROC(test$y, yhat.rf[,2])
 ```
 
-
-# Survival Analysis
+## Survival Analysis
 
 In order to perform survival analysis we define three possible outcomes for a lending: "Fully Paid", "Default" and "Pre-Paid", whose meanings are pretty clear.
 
@@ -691,7 +758,7 @@ piechart(acc_surv_pie, "y") +
   scale_fill_manual(labels=c("Regular Payment", "Early Payment", "Default"), values=c("darkgreen", "darkgray", "darkred"))
 ```
 
-## Survival function
+### Survival function
 
 ```{r}
 acc_surv <- acc_surv %>%
@@ -708,14 +775,14 @@ ggsurvplot(fit, xlab = "Years", legend= "none", ggtheme = theme_minimal())
 summary(fit, times = 0.5)
 ```
 
-## Cox
+### Cox
 
 ```{r}
 acc_surv <- acc_surv %>% select(all_of(model_variables), actual_duration_to_term, status) %>% select(-y)
 acc_surv[, new_numeric_variables[new_numeric_variables %in% names(acc_surv)]] <- scale(model_acc[, new_numeric_variables[new_numeric_variables %in% names(acc_surv)]])
 ```
 
-### Valutare assunzione «Proportional Hazards»
+#### Valutare assunzione «Proportional Hazards»
 
 Per valutare l'assunzione di Proportional Hazards per le covariate si procede dapprima con un check visuale della log(-log(Survival)), che valuta l'assunzione di PH per ogni covariata indipendentemente dalle altre, e successivamente ci si serve dei residui Schoenfeld per valutare l'assunzione di PH tenendo conto anche dalle altre covariate (modello multivariato).
 
@@ -726,7 +793,7 @@ Per valutare l'assunzione di Proportional Hazards per le covariate si procede da
 Infine si valuta la forma funzionale assunta dalle variabili continue *age* e *creat*, confrontandola con la forma lineare.
 
 
-#### 1. log[-log(SKM (t))] --- Graphical check
+##### 1. log[-log(SKM (t))] --- Graphical check
 
 Per l'assunzione di PH abbiamo: $S_X(t) = S_0(t) e^{(\beta' X)}$
 che può essere riscritta come: $log(-log(S_X(t))) - log(-log(S_0(t))) = \beta' X$
@@ -767,7 +834,7 @@ plot(km.fico_class, fun="cloglog", ylab="log(-log(Survival))", xlab="log(time_to
 
 L'assunzione di PH pare valere per tutte le variabili categoriche, mentre sembra che non valga per la "fico class".
 
-#### 2. Schoenfeld residuals --- Graphical check
+##### 2. Schoenfeld residuals --- Graphical check
 
 I residui Schoenfeld sono definiti come: $r_j = x_j - E[x_j|R_j]$ \
 dove $x_j$ è la covariata dell'individuo che *fallisce* al tempo $t_{(j)}$ e $R_j$ è il risk set al tempo $t_{(j)}$.
@@ -793,7 +860,7 @@ model <- coxph(Surv(actual_duration_to_term, status) ~ ., acc_ph)
 summary(model)
 ```
 
-## Calibration
+### Calibration
 
 Si procede con la costruzione dei modelli, specificando l'opzione x = TRUE per poter poi utilizzare la funzione Score del pacchetto riskRegression.
 Creo un modello aumentato con le variabili per cui non vale PH.
@@ -892,10 +959,6 @@ mtext("Cost", side = 3, line = 2.5, cex = 1.7, las = 1)
 
 legend('topright', c("Base Model","Augmented Model"), lwd = c(3, 3), lty = c(1, 3), col = c(1, 1), bty = 'n', cex = 1.7)
 ```
-
-
-# Tuning
-
 
 
 # Conclusions
