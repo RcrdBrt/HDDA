@@ -136,6 +136,41 @@ plot_precision_vs_npred <- function(actuals, predictions, title=""){
 acc_full <- fread("archive/accepted_2007_to_2018Q4.csv", sep = ",", header = T)
 ```
 
+Di seguito viene fornito un elenco delle variabili selezionate in fase di data preparation. Al meglio delle conoscenze, esse fornite per la maggior parte dal cliente in fase di registrazione sulla piattaforma LendingClub.
+
+Variabile|Tipo|Significato
+-|-|-
+addr_state|Fattore|Indica lo Stato di provenienza del richiedente
+annual_inc|Int|Il reddito annuale fornito dal richiedente
+application_type|Fattore|Un fattore esprimente se il richiedente è un individuo singolo oppure è una richiesta proveniente da più persone
+delinq_2yrs|Int|Il numero di insolvenze rateali superiori a 30 giorni segnalate negli ultimi 2 anni nel registro di credito del richiedente
+earliest_cr_line|Date|Data in cui il richiedente ha aperto la sua prima linea di credito
+emp_length|Int|Durata dell'impiego in anni. Il valore varia tra 0 e 10, dove 10 indica 10 o più anni
+fico_range_high|Fattore|Estremo superiore dell'intervallo FICO del richiedente
+fico_range_low|Fattore|Estremo inferiore dell'intervallo FICO
+grade|Fattore|Score assegnato da parte di LendingClub al richiedente
+home_ownership|Fattore|Indica se il richiedente è proprietario di un immobile o è in affitto
+initial_list_status|Fattore|Copertura del prestito da parte di un singolo investitore o meno
+int_rate|Float|Tasso del prestito
+issue_d|Date|Data in cui i fondi sono stati erogati
+last_pymnt_d|Date|Data dell'ultimo pagamento
+loan_amnt|Int|Importo richiesto
+funded_amnt|Int|Importo erogato
+loan_status|Fattore|Stato del prestito (in corso, default, in ritardo, ...)
+mo_sin_old_il_acct|Int|Mesi trascorsi dalla più vecchia linea di credito bancaria
+mo_sin_old_rev_tl_op|Int|Mesi trascorsi dall'apertura del più vecchio conto revolving
+mort_acc|Int|Numero di mutui intestati al richiedente
+num_bc_sats|Int|Numero di solvenze degli estratti conto delle carte di credito del cliente
+num_bc_tl|Int|Numero delle carte del cliente
+num_op_rev_tl|Int|Numero di carte revolving del cliente
+num_rev_accts|Int|Numero di conti revolving
+num_rev_tl_bal_gt_0|Int|Numero di transazioni revolving con saldo maggiore di 0
+num_sats|Int|Numero di linee di credito solventi intestate al richiedente
+open_acc|Int|Numero di linee di credito aperte
+pct_tl_nvr_dlq|Int|Percentuale di rinnovi di credito solventi
+percent_bc_gt_75|Int|Percentuale di carte di credito sopra al massimale di oltre il 75%
+pub_rec|Int|Numero di ritardi di pagamento
+
 ```{r, cache=TRUE}
 variables <- c(
   "addr_state",
@@ -194,6 +229,7 @@ fwrite(acc, "archive/accepted_clean.csv", sep = ",")
 ```
 
 # Data Preparation
+
 ```{r}
 acc <- fread("archive/accepted_clean.csv", sep=",",header=T)
 acc <- as.data.frame(acc)
@@ -455,7 +491,7 @@ model_num_variables <- model_variables[model_variables %in% new_numeric_variable
 
 model_acc <- acc[,model_variables] %>% relocate(y, .after = last_col())
 
-model_acc[, model_num_variables] <- scale(model_acc[, model_num_variables])
+#model_acc[, model_num_variables] <- scale(model_acc[, model_num_variables])
 
 corrplot(cor(model_acc[, model_num_variables]))
 ```
@@ -464,6 +500,12 @@ corrplot(cor(model_acc[, model_num_variables]))
 set.seed(1000)
 train <- sample_frac(model_acc, 0.7)
 test <- anti_join(model_acc,train)
+
+train <- preProcess(train, method = c("center", "scale"))
+test <- predict(train, test)
+
+
+
 ```
 
 To deal with class imbalance we define weights so that the model's predictions will be fair to both classes.
@@ -487,6 +529,7 @@ cat("Accuracy of Unbalanced Model:", 1-misClassError(test$y, yhat.glm.unbalanced
 ```
 
 ```{r}
+set.seed(1000)
 train.under <- train %>% group_by(y) %>% slice_sample(n=min(table(train$y))) %>% ungroup()
 fit.glm.under <- glm(y~., train.under, family="binomial")
 yhat.glm.under<- predict(fit.glm.under, test, type="response")
@@ -670,25 +713,22 @@ La lasso e' bella!
 ## Random Forest
 
 ```{r}
-customTuneRF<- function (data, ntree, model_weights, mtryStart) 
-{
+customTuneRF<- function (data, ntree, mtryStart){
   data <- data %>% group_by(y) %>% slice_sample(n=1e5) %>% ungroup() 
   x <- data %>% select(-y)
   y <- data$y
   tuning_data <- data %>% group_by(y) %>% slice_sample(n=5e4) %>% ungroup()
   tuning_x <- tuning_data %>% select(-y)
   tuning_y <- tuning_data$y
-  class_weights <- unique(model_weights)
-  class_weights <- c("0" = max(class_weights), "1" = min(class_weights))
-  tune <- tuneRF(tuning_x, tuning_y, trace=T, strata=tuning_y, classwt=class_weights, mtryStart=mtryStart)
+  tune <- tuneRF(tuning_x, tuning_y, trace=T, strata=tuning_y, mtryStart=mtryStart, ntreeTry = 100)
   print("Tuning is over!")
   randomForest(x, y, mtry=tune[which.min(tune[, 
-      2]), 1], ntree=ntree, strata=y, classwt=class_weights, importance=T, do.trace=T)
+      2]), 1], ntree=ntree, strata=y, importance=T, do.trace=T)
 }
 ```
 
 ```{r}
-fit.rf.150t = customTuneRF(train, ntree=150, model_weights, mtryStart=7)
+fit.rf.150t = customTuneRF(train, ntree=250, mtryStart=7)
 ```
 
 ```{r}
@@ -742,35 +782,58 @@ In order to perform survival analysis we define three possible outcomes for a le
 To distinguish between Regalur Payment and Early Payment we define a tolerance of -1 month since our dates are all represented as month-year.
 
 ```{r}
-acc_surv <- acc
-acc_surv <- acc_surv %>% 
-  mutate(actual_duration_to_term = as.numeric(last_pymnt_d - issue_d) / (as.numeric(substring(as.character(term),0,2))*30))
-hist(as.numeric(acc_surv[acc$y==0, "actual_duration_to_term"]), col = "darkgreen")
-hist(as.numeric(acc_surv[acc$y==1, "actual_duration_to_term"]), col="darkred",add =T)
-acc_surv_pie <- acc_surv %>%
-  mutate(y = as.factor(case_when(
-      y == 1 ~ 1, ### Default
-      (y == 0) & (actual_duration_to_term < 0.8) ~ -1, ### Early Payment
-      T ~ 0 ### Regular Payment
-    ))
-  )
-piechart(acc_surv_pie, "y") +
-  scale_fill_manual(labels=c("Regular Payment", "Early Payment", "Default"), values=c("darkgreen", "darkgray", "darkred"))
+prep_surv <- function(d, plots=T){
+  d <- d %>% 
+    as.data.frame() %>%
+    mutate(actual_duration_to_term = as.numeric(last_pymnt_d - issue_d) / (as.numeric(substring(as.character(term),0,2))*30))
+  if (plots){
+    ht <- ggplot(d) + 
+      geom_histogram(aes(x=actual_duration_to_term, y = ..count../sum(nrow(d)), fill=y), bins=50) +
+      scale_fill_manual(labels=c("Default", "Fully Paid"), values=c("darkred","darkgreen")) + 
+      scale_x_continuous(labels = scales::percent) + 
+      scale_y_continuous(labels = scales::percent) + 
+      labs(x="Time to end of lending", y = "Percentage of lendings", title="Time to end of lending by outcome") + 
+      guides(fill=guide_legend(title="Outcome"))+
+      theme_minimal() + 
+      theme(plot.title = element_text(hjust = 0.5, size = 16),
+          plot.subtitle = element_text(hjust = 0.5, size = 12))
+    d_pie <- d %>%
+      mutate(y = as.factor(case_when(
+        y == 0 ~ 0, ### Default
+        (y == 1) & (actual_duration_to_term < 0.8) ~ -1, ### Early Payment
+        T ~ 1 ### Regular Payment
+      )))
+    pie <- piechart(d_pie, "y") +
+      scale_fill_manual(labels=c("Regular Payment", "Default", "Early Payment"), values=c("darkgreen", "darkred", "darkgray"))
+  }
+  d <- d %>%
+  mutate(actual_duration_to_term = ifelse(y==1, actual_duration_to_term, 1)) %>%
+  mutate(actual_duration_to_term = ifelse(actual_duration_to_term > 1, 1, actual_duration_to_term)) %>%
+    # ignoro gli early payment e i pagamenti in ritardo, settando il tempo a 1 per loro, intendendo che questi
+    # prestiti sono sopravvissuti fino alla fine.
+  mutate(status = as.numeric(as.character(y)))
+  if (plots) return(list(ht=ht,pie=pie))
+  else return(d)
+}
+
+set.seed(1000)
+train_surv <- sample_frac(acc, 0.7)
+test_surv <- anti_join(acc, train_surv)
+set.seed(1000)
+train_surv <- train_surv %>% group_by(y) %>% slice_sample(n=min(table(train_surv$y))) %>% ungroup()
+train_surv <- prep_surv(train_surv, plots=F)
+test_surv <- prep_surv(test_surv, plots=F)
+
+ret <- prep_surv(acc, plots=T)
+ret$ht
+ret$pie
+
 ```
 
 ### Survival function
 
 ```{r}
-acc_surv <- acc_surv %>%
-  mutate(actual_duration_to_term = ifelse(y==1, actual_duration_to_term, 1)) %>%
-  mutate(actual_duration_to_term = ifelse(actual_duration_to_term > 1, 1, actual_duration_to_term)) %>%
-  mutate(status = as.numeric(as.character(y)))
-# ignoro gli early payment e i pagamenti in ritardo, settando il tempo a 1 per loro, intendendo che questi prestiti sono sopravvissuti fino alla fine.
-
-hist(as.numeric(acc_surv[acc_surv$y==0, "actual_duration_to_term"]), col="darkgreen", breaks=seq(0,1,0.01))
-hist(as.numeric(acc_surv[acc_surv$y==1, "actual_duration_to_term"]), col = "darkred", breaks=seq(0,1,0.05),add=T)
-
-fit <- survfit(Surv(actual_duration_to_term, status) ~ 1, data = acc_surv)
+fit <- survfit(Surv(actual_duration_to_term, status) ~ 1, data = train_surv)
 ggsurvplot(fit, xlab = "Years", legend= "none", ggtheme = theme_minimal())
 summary(fit, times = 0.5)
 ```
@@ -778,8 +841,8 @@ summary(fit, times = 0.5)
 ### Cox
 
 ```{r}
-acc_surv <- acc_surv %>% select(all_of(model_variables), actual_duration_to_term, status) %>% select(-y)
-acc_surv[, new_numeric_variables[new_numeric_variables %in% names(acc_surv)]] <- scale(model_acc[, new_numeric_variables[new_numeric_variables %in% names(acc_surv)]])
+train_surv <- train_surv %>% select(all_of(model_variables), actual_duration_to_term, status) %>% select(-y)
+train_surv[, new_numeric_variables[new_numeric_variables %in% names(acc_surv)]] <- scale(model_acc[, new_numeric_variables[new_numeric_variables %in% names(acc_surv)]])
 ```
 
 #### Valutare assunzione «Proportional Hazards»

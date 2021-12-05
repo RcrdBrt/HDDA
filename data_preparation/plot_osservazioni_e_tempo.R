@@ -1,38 +1,3 @@
-###############################################################################
-
-month_summary <- 
-  acc %>% 
-  group_by(issue_d) %>% 
-  summarise(n_issue_d = n())
-
-plot( month_summary,
-     main="OSSERVAZIONI NEL TEMPO",
-     ylab="osservazioni",
-     xlab="tempo",
-     type="l",
-     col="blue")
-
-month_summary_current <- 
-  acc_with_current %>% 
-  group_by(issue_d) %>% 
-  summarise(n = n())
-
-plot( month_summary_current,
-      main="OSSERVAZIONI NEL TEMPO",
-      ylab="osservazioni",
-      xlab="tempo",
-      type="l",
-      col="red")
-
-
-###############################################################################
-
-month_summary_full <- 
-  acc_full %>% 
-  mutate(issue_d = lubridate::my(issue_d)) %>%
-  group_by(issue_d) %>% 
-  summarise(n_full= n())
-
 month_summary_with_current <- 
   acc_with_current %>% 
   group_by(issue_d) %>% 
@@ -44,7 +9,10 @@ month_summary <-
   summarise(n = n())
 
 month_summary_full <- 
-  month_summary_full %>%
+  acc_full %>% 
+  mutate(issue_d = lubridate::my(issue_d)) %>%
+  group_by(issue_d) %>% 
+  summarise(n_full= n()) %>%
   left_join(month_summary_with_current) %>%
   left_join(month_summary) 
 
