@@ -104,13 +104,13 @@ MyConfusionMatrix <- function(actuals, predictions, threshold=0.5, title=""){
 }
 
 
-plot_precision_vs_npred <- function(actuals, predictions, title=""){
+plot_precision_vs_npred <- function(actuals, predictions, title=""){ ### non serve più, cancellare T.T
   p <- vector("list", length(predictions))
   names(p) <- names(predictions)
   n <- vector("list", length(predictions))
   names(n) <- names(predictions)
   for (i in 1:length(predictions)){
-      for (threshold in seq(0,1,0.05)){
+      for (threshold in seq(0,1,0.01)){
         p[[i]] <- c(p[[i]],precision(actuals, predictions[[i]], threshold = threshold))
         n[[i]] <- c(n[[i]],length(predictions[[i]][predictions[[i]] >= threshold]))
       }
@@ -121,13 +121,60 @@ plot_precision_vs_npred <- function(actuals, predictions, title=""){
   res <- gather(res,var,val,-i) %>% separate(var, c("variable", "Model")) %>% reshape(idvar = c("i","Model"), timevar = "variable", direction = "wide")
   names(res)[c(3,4)] <- c("p","n")
   
-  plotly::plot_ly(res, x=~p*100, y = ~n/length(actuals)*100, type="scatter", mode = "lines+markers", color=~Model, opacity = 1) %>% 
+  res <- res %>% arrange(Model, p)
+  plotly::plot_ly(res) %>%
+  plotly::add_trace(x=~p*100, y = ~n/length(actuals)*100, yaxis="y", type="scatter", mode = "lines+markers", color=~Model, opacity = 1) %>% 
+  plotly::add_trace(x=~p*100, y = ~round(n/length(actuals)*4e4), yaxis="y2", type="scatter", mode = "lines+markers", color=~Model, opacity = 0, showlegend=F) %>%     
   plotly::layout(title = "Results",
                  xaxis = list(title = 'Precision',  ticksuffix = "%"),
-                 yaxis = list(title = 'Number of predicted Fully Paid', ticksuffix = "%"),
-                 legend = list(x=0.8,y=0.9))
+                 yaxis = list(title = 'Percentage of predicted Fully Paid', ticksuffix = "%", gridcolor=rgb(0, 0, 0, max = 255, alpha = 80)),
+                 yaxis2= list(tickfont = list(color = "red"), gridcolor=rgb(255, 0, 0, max = 255, alpha = 20), overlaying = "y",side = "right", automargin = T,title = "Number of predicted Fully Paid"),
+                 legend = list(x=0.7,y=0.9))
 
 }
+
+precision_at_k <- function(actuals, predictions){
+  d <- data.frame(actuals = actuals, score = predictions) %>%
+    arrange(-score)
+  d$k <- 1:nrow(d)
+  p_at_k <- rep(0,nrow(d))
+  n_relevant <- 0
+  for (k in 1:nrow(d)){
+    if (d[k,"actuals"] == 1){
+      n_relevant <- n_relevant+1
+    }
+    p_at_k[k] <- n_relevant/k
+  }
+  p_at_k
+}
+
+plot_precision_at_k <- function(actuals, predictions){
+  test_size <- length(actuals)
+  p_at_k <- vector("list", length(predictions))
+  names(p_at_k) <- names(predictions)
+  for (i in 1:length(predictions)){
+    p_at_k[[i]] <- precision_at_k(actuals, predictions[[i]])
+  }
+  p_at_k <-  p_at_k %>% 
+    sapply('[', seq(max(sapply(p_at_k, length)))) %>% 
+    as.data.frame()
+  p_at_k <- p_at_k %>%
+    mutate(k=1:nrow(p_at_k)) %>%
+    gather(Model, p,-k) %>%
+    filter(k%%100 == 0)
+  plotly::plot_ly(p_at_k) %>%
+  plotly::add_trace(x=~round(k/test_size*100,3), y = ~p*100, type="scatter", mode = "lines+markers", color=~Model) %>% 
+  plotly::add_trace(x=~round(k/test_size*4e4), y = ~p*100, xaxis="x2", type="scatter", mode = "lines+markers", color=~Model, opacity = 0, showlegend=F) %>%     
+
+  plotly::layout(xaxis = list(title = 'K', ticksuffix= "%", gridcolor=rgb(0, 0, 0, max = 255, alpha = 60)),
+                 xaxis2= list(tickfont = list(color = "red"), gridcolor=rgb(255, 0, 0, max = 255, alpha = 20), overlaying = "x",side = "top", automargin = T, title = list(text="Expected K")),
+                 yaxis = list(title = 'Precision @ K', ticksuffix = "%", gridcolor=rgb(0, 0, 0, max = 255, alpha = 60)),
+                 legend = list(x=0.8,y=0.9))
+} 
+```
+
+```{r fig.width=10, fig.height=6}
+plot_precision_vs_npred(test$y, list("glmunbalanced"=yhat.glm.unbalanced, "glmundersampling"=yhat.glm.under, "glmweighted"=yhat.glm.weighted, "glmoverweighted"=yhat.glm.overweighted), title = "Results")
 ```
 
 # Data Ingestion
@@ -174,7 +221,8 @@ pub_rec|Int|Numero di ritardi di pagamento
 ```{r, cache=TRUE}
 variables <- c(
   "addr_state",
-  "annual_inc",
+  #"annual_inc",
+  "dti",
   "application_type",
   "delinq_2yrs",
   "earliest_cr_line",
@@ -212,7 +260,6 @@ variables <- c(
   "tax_liens",
   "term",
   "total_acc",
-  #"total_cu_tl",
   "verification_status"
 )
 ```
@@ -234,7 +281,8 @@ fwrite(acc, "archive/accepted_clean.csv", sep = ",")
 acc <- fread("archive/accepted_clean.csv", sep=",",header=T)
 acc <- as.data.frame(acc)
 numeric_variables <- c(
-  "annual_inc",
+  #"annual_inc",
+  "dti",
   "delinq_2yrs",
   "mo_sin_earliest_cr_line",
   "fico_range_high",
@@ -443,7 +491,8 @@ acc <- acc %>%
 
 # tolte le correlazioni, restano queste variabili esplicative numeriche
 new_numeric_variables <- c(
-  "annual_inc",
+  #"annual_inc",
+  "dti",
   "delinq_2yrs",
   "mo_sin_earliest_cr_line",
   "int_rate",
@@ -501,11 +550,9 @@ set.seed(1000)
 train <- sample_frac(model_acc, 0.7)
 test <- anti_join(model_acc,train)
 
-train <- preProcess(train, method = c("center", "scale"))
-test <- predict(train, test)
-
-
-
+scaling <- preProcess(train, method = c("center", "scale"))
+train <- predict(scaling,train)
+test <- predict(scaling, test)
 ```
 
 To deal with class imbalance we define weights so that the model's predictions will be fair to both classes.
@@ -537,27 +584,29 @@ cat("Accuracy of UnderSampling Model:", 1-misClassError(test$y, yhat.glm.under))
 ```
 
 ```{r}
-fit.glm <- glm(y~., train, family="binomial", weights=model_weights)
-yhat.glm <- predict(fit.glm, test, type="response")
-cat("Accuracy of Balanced Model:", 1-misClassError(test$y, yhat.glm))
+fit.glm.weighted <- glm(y~., train, family="binomial", weights=model_weights)
+yhat.glm.weighted <- predict(fit.glm.weighted, test, type="response")
+cat("Accuracy of Balanced Model:", 1-misClassError(test$y, yhat.glm.weighted))
 ```
 
 
 ```{r fig.width=10, fig.height=4}
 p1 <- MyConfusionMatrix(test$y, yhat.glm.unbalanced, title="Logit Unbalanced")
 p2 <- MyConfusionMatrix(test$y, yhat.glm.under, title="Logit UnderSampling")
-p3 <- MyConfusionMatrix(test$y, yhat.glm, title="Logit Weighted")
+p3 <- MyConfusionMatrix(test$y, yhat.glm.weighted, title="Logit Weighted")
+
 p1+p2+p3
 ```
 
-L'utilizzo dei pesi ci permette di avere previsioni più bilanciate, al costo di peggiorare l'accuracy totale del nostro modello si riescono ad ottenere previsioni più attendibili sulla classe minoritaria (Default). Si osserva infatti come il modello senza il bilanciamento ha un'accuracy sulla classe Default del 9%, mentre il modello bilanciato arriva al 63%. In conclusione otteniamo una Precision sulla classe Fully Paid più elevata.
-Da qui in avanti verranno prodotti solo modelli bilanciati tramite l'utilizzo dei pesi.
+```{r}
+plot_precision_vs_npred(test$y, list("glmunbalanced"=yhat.glm.unbalanced, "glmundersampling"=yhat.glm.under, "glmweighted"=yhat.glm.weighted), title = "Results")
+```
+
+L'utilizzo dei pesi ci permette di avere previsioni più bilanciate. Al costo di peggiorare l'accuracy totale del nostro modello si riescono ad ottenere previsioni più attendibili sulla classe minoritaria (Default). Nonostante questo effetto sia minimo, come si nota nell'ultimo grafico, esso è presente il che ci guida verso la scelta di un train set bilanciato tramite undersampling, tramite il quale si ottengono dei modelli più efficaci e al contempo più parsimoniosi. 
 
 ```{r}
 InformationValue::plotROC(test$y, yhat.glm.under)
 ```
-
-Per avere il modello il più parsimonioso possibile, viene selezionato il training set con undersampling in quanto quello pesato, con un numero di osservazioni di gran lunga superiore, non apporta un apprezzabile incremento di precisione.
 
 ```{r}
 train <- train.under
@@ -567,9 +616,6 @@ train <- train.under
 
 ```{r}
 pca.res <- prcomp(train[, model_num_variables])
-
-plot(x=1:length(pca.res$sdev), y=pca.res$sdev, type="p", col=ifelse(pca.res$sdev>=1,"red","blue") , xlab="Component", ylab="Standard Deviation") # si prendono quelle > 1
-abline(h=1, col="red")
 
 p1 <- ggplot()+
   geom_point(aes(x=1:length(pca.res$sdev), y=pca.res$sdev, col=pca.res$sdev<1)) +
@@ -583,7 +629,6 @@ p1 <- ggplot()+
 p2 <- fviz_eig(pca.res, chioce="eigenvalue", ggtheme = theme_minimal() + theme(plot.title = element_text(hjust = 0.5, size = 16)))
 p1+p2
 ```
-
 
 ```{r}
 train.pca <- as.data.frame(as.matrix(train[,model_num_variables]) %*% pca.res$rotation)[,1:7] # prime sette variabili
@@ -682,7 +727,6 @@ for(k in 1:K){
 
 boxplot(accs,ylim=c(0,1))
 boxplot(precs,ylim=c(0,1))
-
 ```
 
 ### Lasso
@@ -698,7 +742,7 @@ cat(paste(c("Variables excluded by lasso selection are:", rownames(coef(fit.lass
 ```
 
 ```{r}
-yhat.lasso = predict(fit.lasso.cv, X.test, s = "lambda.1se",  type="response")
+yhat.lasso <-  predict(fit.lasso.cv, X.test, s = "lambda.1se",  type="response")
 
 MyConfusionMatrix(test$y, yhat.lasso, threshold = 0.5, title="Lasso Logit")
 cat("Accuracy = ", 1-misClassError(test$y, yhat.lasso, threshold = 0.5))
@@ -720,7 +764,7 @@ customTuneRF<- function (data, ntree, mtryStart){
   tuning_data <- data %>% group_by(y) %>% slice_sample(n=5e4) %>% ungroup()
   tuning_x <- tuning_data %>% select(-y)
   tuning_y <- tuning_data$y
-  tune <- tuneRF(tuning_x, tuning_y, trace=T, strata=tuning_y, mtryStart=mtryStart, ntreeTry = 100)
+  tune <- tuneRF(tuning_x, tuning_y, trace=T, strata=tuning_y, mtryStart=mtryStart, ntreeTry = 50)
   print("Tuning is over!")
   randomForest(x, y, mtry=tune[which.min(tune[, 
       2]), 1], ntree=ntree, strata=y, importance=T, do.trace=T)
@@ -728,7 +772,7 @@ customTuneRF<- function (data, ntree, mtryStart){
 ```
 
 ```{r}
-fit.rf.150t = customTuneRF(train, ntree=250, mtryStart=7)
+fit.rf.150t = customTuneRF(train, ntree=200, mtryStart=7)
 ```
 
 ```{r}
@@ -785,7 +829,7 @@ To distinguish between Regalur Payment and Early Payment we define a tolerance o
 prep_surv <- function(d, plots=T){
   d <- d %>% 
     as.data.frame() %>%
-    mutate(actual_duration_to_term = as.numeric(last_pymnt_d - issue_d) / (as.numeric(substring(as.character(term),0,2))*30))
+    mutate(actual_duration_to_term = as.numeric(last_pymnt_d - issue_d) / (as.numeric(substring(as.character(term),0,2))*(365/12)))
   if (plots){
     ht <- ggplot(d) + 
       geom_histogram(aes(x=actual_duration_to_term, y = ..count../sum(nrow(d)), fill=y), bins=50) +
@@ -799,19 +843,18 @@ prep_surv <- function(d, plots=T){
           plot.subtitle = element_text(hjust = 0.5, size = 12))
     d_pie <- d %>%
       mutate(y = as.factor(case_when(
-        y == 0 ~ 0, ### Default
+        y == 0 ~ 1, ### Default
         (y == 1) & (actual_duration_to_term < 0.8) ~ -1, ### Early Payment
-        T ~ 1 ### Regular Payment
+        T ~ 0 ### Regular Payment
       )))
     pie <- piechart(d_pie, "y") +
-      scale_fill_manual(labels=c("Regular Payment", "Default", "Early Payment"), values=c("darkgreen", "darkred", "darkgray"))
+      scale_fill_manual(labels=c("Regular Payment", "Early Payment", "Default"), values=c("darkgreen",  "darkgray", "darkred"))
   }
   d <- d %>%
-  mutate(actual_duration_to_term = ifelse(y==1, actual_duration_to_term, 1)) %>%
-  mutate(actual_duration_to_term = ifelse(actual_duration_to_term > 1, 1, actual_duration_to_term)) %>%
-    # ignoro gli early payment e i pagamenti in ritardo, settando il tempo a 1 per loro, intendendo che questi
-    # prestiti sono sopravvissuti fino alla fine.
-  mutate(status = as.numeric(as.character(y)))
+    mutate(actual_duration_to_term = ifelse(y==0, actual_duration_to_term, 1)) %>%
+    mutate(actual_duration_to_term = ifelse(actual_duration_to_term > 1, 1, actual_duration_to_term)) %>%
+      # ignoro gli early payment e i pagamenti in ritardo, settando il tempo a 1 per loro, intendendo che           # questi prestiti sono sopravvissuti fino alla fine.
+    mutate(status = ifelse(y==0,1,0)) # status is the opposite of y: status 0 means Fully Paid, status 1 means Default (Failure in Survival Analysis lexicon).
   if (plots) return(list(ht=ht,pie=pie))
   else return(d)
 }
@@ -820,7 +863,6 @@ set.seed(1000)
 train_surv <- sample_frac(acc, 0.7)
 test_surv <- anti_join(acc, train_surv)
 set.seed(1000)
-train_surv <- train_surv %>% group_by(y) %>% slice_sample(n=min(table(train_surv$y))) %>% ungroup()
 train_surv <- prep_surv(train_surv, plots=F)
 test_surv <- prep_surv(test_surv, plots=F)
 
@@ -828,6 +870,21 @@ ret <- prep_surv(acc, plots=T)
 ret$ht
 ret$pie
 
+```
+
+```{r}
+### Check if everything is as intended
+
+ ggplot(train_surv) + 
+      geom_histogram(aes(x=actual_duration_to_term, y = ..count../sum(nrow(train_surv)), fill=as.character(status)), bins=25) +
+      scale_fill_manual(labels=c("Fully Paid", "Default"), values=c("darkgreen","darkred")) + 
+      scale_x_continuous(labels = scales::percent) + 
+      scale_y_continuous(labels = scales::percent) + 
+      labs(x="Time to end of lending", y = "Percentage of lendings", title="Time to end of lending by outcome") + 
+      guides(fill=guide_legend(title="Outcome"))+
+      theme_minimal() + 
+      theme(plot.title = element_text(hjust = 0.5, size = 16),
+          plot.subtitle = element_text(hjust = 0.5, size = 12))
 ```
 
 ### Survival function
@@ -842,9 +899,19 @@ summary(fit, times = 0.5)
 
 ```{r}
 train_surv <- train_surv %>% select(all_of(model_variables), actual_duration_to_term, status) %>% select(-y)
-train_surv[, new_numeric_variables[new_numeric_variables %in% names(acc_surv)]] <- scale(model_acc[, new_numeric_variables[new_numeric_variables %in% names(acc_surv)]])
+test_surv <- test_surv %>% select(all_of(model_variables), actual_duration_to_term, status) %>% select(-y)
+surv_scaling <- preProcess(train_surv %>% select(-status, -actual_duration_to_term), method = c("center", "scale"))
+train_surv <- predict(surv_scaling, train_surv)
+test_surv <- predict(surv_scaling, test_surv)
+
+train_surv <- train_surv %>% group_by(status) %>% slice_sample(n=min(table(train$y))) %>% ungroup()
 ```
 
+```{r}
+fit <- survfit(Surv(actual_duration_to_term, status) ~ 1, data = train_surv)
+ggsurvplot(fit, xlab = "Years", legend= "none", ggtheme = theme_minimal())
+summary(fit, times = 0.5)
+```
 #### Valutare assunzione «Proportional Hazards»
 
 Per valutare l'assunzione di Proportional Hazards per le covariate si procede dapprima con un check visuale della log(-log(Survival)), che valuta l'assunzione di PH per ogni covariata indipendentemente dalle altre, e successivamente ci si serve dei residui Schoenfeld per valutare l'assunzione di PH tenendo conto anche dalle altre covariate (modello multivariato).
@@ -867,31 +934,31 @@ Questo tipo di verifica può essere fatto unicamente sulle variabili non continu
 ```{r}
 par(mfrow=c(2,2),mar=c(4,4,2,2))
 
-km.addr_state <- survfit(Surv(actual_duration_to_term, status) ~ addr_state, data=acc_surv)
+km.addr_state <- survfit(Surv(actual_duration_to_term, status) ~ addr_state, data=train_surv)
 plot(km.addr_state, fun="cloglog", ylab="log(-log(Survival))", xlab="log(time_to_term)", main="Check PH assumption of address state")
 
-km.appl_type <- survfit(Surv(actual_duration_to_term, status) ~ application_type, data=acc_surv)
+km.appl_type <- survfit(Surv(actual_duration_to_term, status) ~ application_type, data=train_surv)
 plot(km.appl_type, fun="cloglog", ylab="log(-log(Survival))", xlab="log(time_to_term)", main="Check PH assumption of application type")
 
-km.emp_length <- survfit(Surv(actual_duration_to_term, status) ~ emp_length, data=acc_surv)
+km.emp_length <- survfit(Surv(actual_duration_to_term, status) ~ emp_length, data=train_surv)
 plot(km.emp_length, fun="cloglog", ylab="log(-log(Survival))", xlab="log(time_to_term)", main="Check PH assumption of employment length")
 
-km.home_ownership <- survfit(Surv(actual_duration_to_term, status) ~ home_ownership, data=acc_surv)
+km.home_ownership <- survfit(Surv(actual_duration_to_term, status) ~ home_ownership, data=train_surv)
 plot(km.addr_state, fun="cloglog", ylab="log(-log(Survival))", xlab="log(time_to_term)", main="Check PH assumption of home ownership")
 
-km.init_list <- survfit(Surv(actual_duration_to_term, status) ~ initial_list_status, data=acc_surv)
+km.init_list <- survfit(Surv(actual_duration_to_term, status) ~ initial_list_status, data=train_surv)
 plot(km.init_list, fun="cloglog", ylab="log(-log(Survival))", xlab="log(time_to_term)", main="Check PH assumption of initial list status")
 
-km.purpose <- survfit(Surv(actual_duration_to_term, status) ~ purpose, data=acc_surv)
+km.purpose <- survfit(Surv(actual_duration_to_term, status) ~ purpose, data=train_surv)
 plot(km.purpose, fun="cloglog", ylab="log(-log(Survival))", xlab="log(time_to_term)", main="Check PH assumption of purpose")
 
-km.term <- survfit(Surv(actual_duration_to_term, status) ~ term, data=acc_surv)
+km.term <- survfit(Surv(actual_duration_to_term, status) ~ term, data=train_surv)
 plot(km.term, fun="cloglog", ylab="log(-log(Survival))", xlab="log(time_to_term)", main="Check PH assumption of term")
 
-km.ver_status <- survfit(Surv(actual_duration_to_term, status) ~ verification_status, data=acc_surv)
-plot(km.ver_status, fun="cloglog", ylab="log(-log(Survival))", xlab="log(time_to_term)", main="Check PH assumption of verification status")
+km.ver_status <- survfit(Surv(actual_duration_to_term, status) ~ verification_status, data=train_surv)
+plot(km.ver_status,fun="cloglog", ylab="log(-log(Survival))", xlab="log(time_to_term)", main="Check PH assumption of verification status")
 
-km.fico_class <- survfit(Surv(actual_duration_to_term, status) ~ fico_class, data=acc_surv)
+km.fico_class <- survfit(Surv(actual_duration_to_term, status) ~ fico_class, data=train_surv)
 plot(km.fico_class, fun="cloglog", ylab="log(-log(Survival))", xlab="log(time_to_term)", main="Check PH assumption of fico class")
 ```
 
@@ -905,21 +972,50 @@ Ci si aspetta che il valore atteso dei residui sia 0, ne segue che l'andamento d
 
 
 ```{r}
-model_base <- coxph(Surv(actual_duration_to_term, status) ~ ., data = acc_surv %>% select(-home_ownership))
+model_base <- coxph(Surv(actual_duration_to_term, status) ~ ., data = train_surv)
 czph <- cox.zph(model_base, terms = F)
 
 par(mfrow=c(3,3),mar=c(4,4,2,2))
 plot(czph, resid=FALSE)
 ```
 
-Per molte variabili non vale l'assunzione di PH, le escludiamo. Alcune, sebbene graficamente sarebbero da escludere, sono invece tenute per via della scala. Ad esempio beta(t) di annual_inc è chiaramente non costante, tuttavia la variazione avviene su un ordine di grandezza di 1e-6 !!! 
+Per molte variabili non vale l'assunzione di PH, le escludiamo. Alcune, sebbene graficamente sarebbero da escludere, sono invece tenute per via della scala.
+
+###
+Ad esempio beta(t) di annual_inc è chiaramente non costante, tuttavia la variazione avviene su un ordine di grandezza di 1e-6 !!! 
+###
 
 ```{r}
-acc_ph <- acc_surv %>% select(-application_type, -initial_list_status, -int_rate, -num_rev_tl_bal_gt_0, -pct_tl_nvr_dlq, -purpose, -revol_bal, -revol_util, -term, -total_acc, -verification_status, -mo_sin_earliest_cr_line, -num_bc_not_sats, -home_ownership, -addr_state)
+train_ph <- train_surv %>% select(-application_type, -initial_list_status, -int_rate, -num_rev_tl_bal_gt_0, -pct_tl_nvr_dlq, -purpose, -revol_bal, -revol_util, -term, -total_acc, -verification_status, -mo_sin_earliest_cr_line, -num_bc_not_sats, -home_ownership, -addr_state)
 ```
 
 ```{r}
-model <- coxph(Surv(actual_duration_to_term, status) ~ ., acc_ph)
+ph_model <- coxph(Surv(actual_duration_to_term, status) ~ 0+., train_ph, x=T,y=T)
+ph_formula <- paste(names(ph_model$coefficient), collapse = "+")
+
+model <- coxph(Surv(actual_duration_to_term, status) ~
+                 dti+
+                 delinq_2yrs+
+                 emp_length+
+                 loan_amnt+
+                 mo_sin_old_il_acct+
+                 mort_acc+
+                 num_bc_tl+
+                 num_op_rev_tl+
+                 open_acc+
+                 percent_bc_gt_75+
+                 pub_rec+
+                 tax_liens+
+                 fico_class+
+                 num_not_sats+
+                 survival::strata(application_type) +
+                 survival::strata(initial_list_status) +
+                 survival::strata(purpose) +
+                 survival::strata(term) +
+                 survival::strata(verification_status) +
+                 survival::strata(home_ownership) +
+                 survival::strata(addr_state)
+               , train_surv, x =T,y=T) 
 summary(model)
 ```
 
@@ -928,36 +1024,13 @@ summary(model)
 Si procede con la costruzione dei modelli, specificando l'opzione x = TRUE per poter poi utilizzare la funzione Score del pacchetto riskRegression.
 Creo un modello aumentato con le variabili per cui non vale PH.
 
-```{r}
-library(riskRegression)
-library(future)
-library(foreach)
-library(doFuture)
-library(survival)
-```
 
 ```{r}
-# train.surv <- ...
-model_base <- coxph(model$formula, data = acc_surv %>% select(-addr_state,-home_ownership), x = T,y=T)
-
-model_aug <- coxph(Surv(actual_duration_to_term, status) ~ ., data = acc_surv %>% select(-addr_state,-home_ownership), x = T,y=T)
-
-score <- Score(list("Base model"=model_base,"Augmented Model"=model_aug),
+score <- Score(list("PH model"=ph_model,"Stratified Model"=model),
               formula=Surv(actual_duration_to_term, status)~1,
-              data=acc_surv, conf.int=F,
+              data=train_surv, conf.int=F,
               times=seq(0.1,0.9,0.2),
               plots=c("calibration","ROC"),
-              progress.bar=1)
-
-# internal cross-validation
-CVscore <- Score(list("Base model"=model_base,"Augmented Model"=model_aug),
-              formula=Surv(actual_duration_to_term, status)~1,
-              data=acc_surv %>% select(-addr_state,-home_ownership), conf.int=F,
-              times=c(0.5),
-              #times=seq(0.1,0.9,0.2),
-              plots="calibration",
-              split.method="bootcv",B=10,M=100,seed=2021,
-              parallel="multicore",
               progress.bar=1)
 ```
 
@@ -968,59 +1041,30 @@ Per valutare la calibrazione dei modelli si usano insieme il Calibration Plot e 
 ```{r}
 plotCalibration(score,times=0.5, cens.method="local",method="quantile", q=20, auc.in.legend = F)
 title(main="Calibration at half term")
-
-plotCalibration(CVscore,times=5,cens.method="local",method="quantile",q=10, auc.in.legend = F)
-title(main="Calibration at half term")
 ```
 
 ### Discrimination
 
 ```{r}
+plotROC(score,times=0.1,cens.method="local")
 plotROC(score,times=0.5,cens.method="local")
+plotROC(score,times=0.9,cens.method="local")
+
 title(main="time-dependent ROC at half term")
 ```
 
-```{r}
-CVscore$AUC$score %>% filter(times == 0.5, model %in% c("Base Model", "Augmented Model")) %>% mutate(C.I = paste0("[", round(lower, 2), ",", round(upper,2), "]")) %>% select(model, AUC, C.I) %>% pander()
-```
-
-### Net Benefit
-
-Quanto appena osservato ci indica che entrambi i modelli sono molto simili in quanto a calibrazione e capacità di discriminazione. \
-Per arrivare infine a una valutazione dei modelli che ci consenta di affermare quale dei due sia migliore si stima il Net Benefit di ciascun modello e si confrontano i valori così ottenuti.
 
 
-```{r include=FALSE}
-source("data_preparation/stdca.R")
 
-fit_base<-survfit(model_base,newdata=d)
-d$riskdeath_base<- 1-as.numeric(summary(fit_base,times=5)$surv)
-fit_aug<-survfit(model_aug,newdata=d)
-d$riskdeath_aug<- 1-as.numeric(summary(fit_aug,times=5)$surv)
-
-netbenefit <- stdca(data = d, outcome = "status", ttoutcome = "fuyrs", timepoint = 5, xstop = 0.5, 
-                    predictors = c("riskdeath_base","riskdeath_aug"))
-```
+### Predictions
 
 ```{r}
-par(mar = c(5, 4.5, 4, 1)) 
+fit.cox<-survfit(model,newdata=test_surv)
+yhat.cox <- as.numeric(summary(fit.cox,times=1)$surv)
 
-# Net Benefit for model_base:
-plot(netbenefit$net.benefit$threshold, netbenefit$net.benefit$riskdeath_base, type = "l", lwd = 3, 
-     xlim = c(0, 1), ylim = c(0, 0.2), xlab = "Riskdeath", ylab = "Net Benefit", xaxt = "n", yaxt = "n", 
-     cex.lab = 1.7, cex.axis = 1.6, frame = F)
-axis(1, at = seq(0,1,0.1), labels = NA, pos = 0)
-axis(1, at = seq(0,1,0.1), labels = seq(0,1,0.1), cex.axis = 1.7, pos = 0)
-axis(2, at = c(0,0.05,0.1,0.15,0.2), labels = c(0,0.05,0.1,0.15,0.2), cex.axis = 1.7, pos = 0)
+InformationValue::misClassError((1-test_surv$status), yhat.cox)
 
-# Net Benefit for model_aug:
-lines(netbenefit$net.benefit$threshold, netbenefit$net.benefit$riskdeath_aug, type = "l", lty = 3, lwd = 3) 
-
-# We add an extra axis on the top of the graph with the costs:
-axis(3, at = c(0,0.2,0.4,0.6,0.8,1), labels = c(0,0.25,0.67,1.5,4,'Inf'), cex.axis = 1.6)
-mtext("Cost", side = 3, line = 2.5, cex = 1.7, las = 1)
-
-legend('topright', c("Base Model","Augmented Model"), lwd = c(3, 3), lty = c(1, 3), col = c(1, 1), bty = 'n', cex = 1.7)
+MyConfusionMatrix(as.factor(as.character(1-test_surv$status)), yhat.cox, threshold = 0.5)
 ```
 
 
@@ -1038,16 +1082,25 @@ score <- Score(list("LogReg"=fit.glm,
               plots=c("calibration","ROC"),
               progress.bar=1)
 
+score <- Score(list("LogReg"=fit.glm),
+              formula=y~1,
+              data=test, conf.int=F,
+              plots=c("calibration","ROC"),
+              progress.bar=1)
+
+plotCalibration(score,times=0.5, cens.method="local",method="quantile", q=20, auc.in.legend = F)
+title(main="Calibration at half term")
 ```
 
-
 ```{r fig.height=6, fig.width=10}
-plot_precision_vs_npred(test$y, list("glm"=yhat.glm, "pca"=yhat.pca, "ridge"=yhat.ridge, "lasso"=yhat.lasso,"RandomForest"=yhat.rf[,2]), title = "Results")
+plot_precision_vs_npred(test$y, list("glm"=yhat.glm.under, "pca"=yhat.pca, "backward"=yhat.glm.backward, "ridge"=yhat.ridge, "lasso"=yhat.lasso,"RandomForest"=yhat.rf[,2], "Cox"=yhat.cox), title = "Results")
+```
+
+```{r fig.width=10, fig.height=6}
+plot_precision_at_k(test$y, list("under"=yhat.glm.under, "unbal"=yhat.glm.unbalanced, "weighted"=yhat.glm.weighted))
 ```
 
 ```{r}
 stopCluster(cl)
 ```
-
-
 
