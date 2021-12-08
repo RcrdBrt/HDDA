@@ -67,11 +67,7 @@ library(car)
 registerDoMC(cores = detectCores())
 #cl = makePSOCKcluster(detectCores())
 #registerDoParallel(cl)
-```
 
-# Useful functions
-
-```{r, include=F}
 piechart <- function(d, group, legend_title = "Outcome"){
   piepercent <- d %>% 
     group_by((!!sym(group))) %>% 
@@ -148,7 +144,7 @@ precision_at_k <- function(actuals, predictions){
   p_at_k
 }
 
-plot_precision_at_k <- function(actuals, predictions){
+plot_precision_at_k <- function(actuals, predictions, resolution_k=100){
   test_size <- length(actuals)
   p_at_k <- vector("list", length(predictions))
   names(p_at_k) <- names(predictions)
@@ -161,11 +157,10 @@ plot_precision_at_k <- function(actuals, predictions){
   p_at_k <- p_at_k %>%
     mutate(k=1:nrow(p_at_k)) %>%
     gather(Model, p,-k) %>%
-    filter(k%%100 == 0)
+    filter( k == 1 | k %% resolution_k == 0)
   plotly::plot_ly(p_at_k) %>%
   plotly::add_trace(x=~round(k/test_size*100,3), y = ~p*100, type="scatter", mode = "lines+markers", color=~Model) %>% 
   plotly::add_trace(x=~round(k/test_size*4e4), y = ~p*100, xaxis="x2", type="scatter", mode = "lines+markers", color=~Model, opacity = 0, showlegend=F) %>%     
-
   plotly::layout(xaxis = list(title = 'K', ticksuffix= "%", gridcolor=rgb(0, 0, 0, max = 255, alpha = 60)),
                  xaxis2= list(tickfont = list(color = "red"), gridcolor=rgb(255, 0, 0, max = 255, alpha = 20), overlaying = "x",side = "top", automargin = T, title = list(text="Expected K")),
                  yaxis = list(title = 'Precision @ K', ticksuffix = "%", gridcolor=rgb(0, 0, 0, max = 255, alpha = 60)),
@@ -173,15 +168,19 @@ plot_precision_at_k <- function(actuals, predictions){
 } 
 ```
 
-```{r fig.width=10, fig.height=6}
-plot_precision_vs_npred(test$y, list("glmunbalanced"=yhat.glm.unbalanced, "glmundersampling"=yhat.glm.under, "glmweighted"=yhat.glm.weighted, "glmoverweighted"=yhat.glm.overweighted), title = "Results")
-```
 
 # Data Ingestion
 
 ```{r message=FALSE, warning=FALSE, cache=TRUE, paged.print=FALSE}
 acc_full <- fread("archive/accepted_2007_to_2018Q4.csv", sep = ",", header = T)
 ```
+
+Il dataset utilizzato proviene da [kaggle](https://www.kaggle.com/wordsforthewise/lending-club). Sono stati considerati soltanto i prestiti che sono stati erogati contenuti nel file: accepted_2007_to_2018Q4.csv.
+In origine il dataset complessivo contiene 151 variabili e 2260701 osservazioni.
+
+{r message=FALSE, warning=FALSE, cache=TRUE, paged.print=FALSE}
+acc_full <- fread("archive/accepted_2007_to_2018Q4.csv", sep = ",", header = T)
+
 
 Di seguito viene fornito un elenco delle variabili selezionate in fase di data preparation. Al meglio delle conoscenze, esse fornite per la maggior parte dal cliente in fase di registrazione sulla piattaforma LendingClub.
 
@@ -217,6 +216,15 @@ open_acc|Int|Numero di linee di credito aperte
 pct_tl_nvr_dlq|Int|Percentuale di rinnovi di credito solventi
 percent_bc_gt_75|Int|Percentuale di carte di credito sopra al massimale di oltre il 75%
 pub_rec|Int|Numero di ritardi di pagamento
+pub_rec_bankruptcies|Factor|Numero di volte in cui il cliente ha dichiarato bancarotta
+purpose|Factor|Motivo del prestito, espresso dal richiedente
+revol_bal|Int|Saldo totale del credito revolving
+revol_util|Int|Percentuale di utilizzo del credito revolving da parte del richiedente
+sub_grade|Factor|Rate del prestito, assegnato da LendingClub
+tax_liens|Int|Numero di ipoteche intestate al richiedente
+term|Int|Numero di rate, durata del prestito
+total_acc|Int|Numero di prestiti in corso al momento della richiesta
+verification_status|Factor|Informazioni fornite dal richiedente sono state verificate o meno
 
 ```{r, cache=TRUE}
 variables <- c(
@@ -269,13 +277,12 @@ acc <- acc_full
 acc <- acc[,..variables]
 acc <- acc[complete.cases(acc),]
 acc <- acc[!apply(acc, 1, function(x) any(x=="")),]
-```
-
-```{r}
 fwrite(acc, "archive/accepted_clean.csv", sep = ",")
 ```
 
 # Data Preparation
+
+Dopo un'attenta analisi, alcune tra le variabili categoriche selezionate offrono un'elevato numero di livelli. Data la quantità di osservazioni, si modificano alcune variabili al fine di diminuire il numero di livelli che presentano. In particolare, loan_status viene trasformata in un fattore a 2 livelli: 0 se il prestito è in stato di default o in forte ritardo con i pagamenti, 1 se invece è stato rimborsato con successo. Il dataset inoltre presenta una variabile geografica (addr_state), indicante lo stato di provenienza del richiedente che è stata ridotta a 7 livelli raggruppanti le macro-aree geografiche degli Stati Uniti (West Coast, Midwest, ...). Un'altra motivazione per la riduzione del numero dei livelli è la riduzione dello sbilanciamento inter-classe. Ad esempio, la variabile purpose è stata ridotta da 15 a 3 livelli mantenendo i 2 più numerosi e accorpando tutti gli altri livelli (nella classe other).
 
 ```{r}
 acc <- fread("archive/accepted_clean.csv", sep=",",header=T)
@@ -599,7 +606,7 @@ p1+p2+p3
 ```
 
 ```{r}
-plot_precision_vs_npred(test$y, list("glmunbalanced"=yhat.glm.unbalanced, "glmundersampling"=yhat.glm.under, "glmweighted"=yhat.glm.weighted), title = "Results")
+plot_precision_at_k(test$y, list("glmunbalanced"=yhat.glm.unbalanced, "glmundersampling"=yhat.glm.under, "glmweighted"=yhat.glm.weighted))
 ```
 
 L'utilizzo dei pesi ci permette di avere previsioni più bilanciate. Al costo di peggiorare l'accuracy totale del nostro modello si riescono ad ottenere previsioni più attendibili sulla classe minoritaria (Default). Nonostante questo effetto sia minimo, come si nota nell'ultimo grafico, esso è presente il che ci guida verso la scelta di un train set bilanciato tramite undersampling, tramite il quale si ottengono dei modelli più efficaci e al contempo più parsimoniosi. 
@@ -676,7 +683,7 @@ cat("Accuracy = ", 1-misClassError(test$y, yhat.glm.backward))
 InformationValue::plotROC(test$y, yhat.glm.backward)
 ```
 
-Backward e' troppo pesante, cerchiamo altri metodi
+
 
 ### Ridge
 
@@ -869,7 +876,6 @@ test_surv <- prep_surv(test_surv, plots=F)
 ret <- prep_surv(acc, plots=T)
 ret$ht
 ret$pie
-
 ```
 
 ```{r}
@@ -920,9 +926,6 @@ Per valutare l'assunzione di Proportional Hazards per le covariate si procede da
 
 2. Schoenfeld residuals --- Graphical check
 
-Infine si valuta la forma funzionale assunta dalle variabili continue *age* e *creat*, confrontandola con la forma lineare.
-
-
 ##### 1. log[-log(SKM (t))] --- Graphical check
 
 Per l'assunzione di PH abbiamo: $S_X(t) = S_0(t) e^{(\beta' X)}$
@@ -972,8 +975,8 @@ Ci si aspetta che il valore atteso dei residui sia 0, ne segue che l'andamento d
 
 
 ```{r}
-model_base <- coxph(Surv(actual_duration_to_term, status) ~ ., data = train_surv)
-czph <- cox.zph(model_base, terms = F)
+model.cox.base <- coxph(Surv(actual_duration_to_term, status) ~ ., data = train_surv)
+czph <- cox.zph(model.cox.base, terms = F)
 
 par(mfrow=c(3,3),mar=c(4,4,2,2))
 plot(czph, resid=FALSE)
@@ -990,33 +993,59 @@ train_ph <- train_surv %>% select(-application_type, -initial_list_status, -int_
 ```
 
 ```{r}
-ph_model <- coxph(Surv(actual_duration_to_term, status) ~ 0+., train_ph, x=T,y=T)
-ph_formula <- paste(names(ph_model$coefficient), collapse = "+")
+model.cox.ph <- coxph(Surv(actual_duration_to_term, status) ~ ., train_ph, x=T,y=T)
+formula.cox.ph <- paste(names(model.cox.ph$coefficient), collapse = "+")
+  
+model.cox.strata <- coxph(
+  Surv(actual_duration_to_term, status) ~
+    dti +
+    delinq_2yrs +
+    emp_length +
+    loan_amnt +
+    mo_sin_old_il_acct +
+    mort_acc+num_bc_tl +
+    num_op_rev_tl +
+    open_acc +
+    percent_bc_gt_75 +
+    pub_rec +
+    tax_liens +
+    fico_class +
+    num_not_sats + 
+    survival::strata(application_type) +
+    survival::strata(initial_list_status) +
+    survival::strata(purpose) +
+    survival::strata(term) +
+    survival::strata(verification_status) +
+    survival::strata(home_ownership) +
+    survival::strata(addr_state),
+  train_surv, x =T, y=T) 
+summary(model.cox.strata)
+```
 
-model <- coxph(Surv(actual_duration_to_term, status) ~
-                 dti+
-                 delinq_2yrs+
-                 emp_length+
-                 loan_amnt+
-                 mo_sin_old_il_acct+
-                 mort_acc+
-                 num_bc_tl+
-                 num_op_rev_tl+
-                 open_acc+
-                 percent_bc_gt_75+
-                 pub_rec+
-                 tax_liens+
-                 fico_class+
-                 num_not_sats+
-                 survival::strata(application_type) +
-                 survival::strata(initial_list_status) +
-                 survival::strata(purpose) +
-                 survival::strata(term) +
-                 survival::strata(verification_status) +
-                 survival::strata(home_ownership) +
-                 survival::strata(addr_state)
-               , train_surv, x =T,y=T) 
-summary(model)
+
+### Functional form of contiuous variables
+
+```{r}
+mar.res<-resid(model.cox.base,type='martingale')
+
+for (variable in model_num_variables){
+  ms <- coxph(Surv(actual_duration_to_term, status>0) ~ ns(eval(as.name(variable)),knots=c(-1,0,1)), data = train_surv) # ns natural cubic splines, e knots sono i nodi delle splines.
+  pred <- predict(ms, type="terms", se=TRUE) # terms indica che voglio beta * x
+  hfit <- pred$fit[,1]
+  hse <- pred$se[,1]
+  hmat <- cbind(hfit, hfit+1.96*hse,hfit-1.96*hse)
+  o <- order(train_surv[[variable]])
+  matplot(train_surv[[variable]][o], hmat[o, ], pch="*",col=c("red","orangered","orangered"), lwd=c(2,1,1),xlab = variable, ylab="log hazard ratio",main=paste("Check functional form of",variable),type="l")
+  
+  ms <- coxph(Surv(actual_duration_to_term, status) ~ eval(as.name(variable)), data = train_surv) # ns natural cubic splines, e knots sono i nodi delle splines.
+  pred <- predict(ms, type="terms", se=TRUE) # terms indica che voglio beta * x
+  hfit <- pred$fit[,1]
+  hse <- pred$se[,1]
+  hmat <- cbind(hfit, hfit+1.96*hse,hfit-1.96*hse)
+  o <- order(train_surv[[variable]])
+  matplot(train_surv[[variable]][o], hmat[o, ], pch="*",col=c("blue","cornflowerblue","cornflowerblue"), lwd=c(2,1,1),type="l", add=T)
+  legend("topright",c("natural spline","linear"),col=c(2,4),lwd=2,bty="n")
+}
 ```
 
 ### Calibration
@@ -1026,7 +1055,7 @@ Creo un modello aumentato con le variabili per cui non vale PH.
 
 
 ```{r}
-score <- Score(list("PH model"=ph_model,"Stratified Model"=model),
+score <- Score(list("PH model"=model.cox.ph,"Stratified Model"=model.cox.strata),
               formula=Surv(actual_duration_to_term, status)~1,
               data=train_surv, conf.int=F,
               times=seq(0.1,0.9,0.2),
@@ -1059,12 +1088,12 @@ title(main="time-dependent ROC at half term")
 ### Predictions
 
 ```{r}
-fit.cox<-survfit(model,newdata=test_surv)
-yhat.cox <- as.numeric(summary(fit.cox,times=1)$surv)
+fit.cox.strata<-survfit(model.cox.strata,newdata=test_surv)
+yhat.cox.strata <- as.numeric(summary(fit.cox.strata,times=1)$surv)
 
-InformationValue::misClassError((1-test_surv$status), yhat.cox)
+InformationValue::misClassError((1-test_surv$status), yhat.cox.strata)
 
-MyConfusionMatrix(as.factor(as.character(1-test_surv$status)), yhat.cox, threshold = 0.5)
+MyConfusionMatrix(as.factor(as.character(1-test_surv$status)), yhat.cox.strata, threshold = 0.5)
 ```
 
 
