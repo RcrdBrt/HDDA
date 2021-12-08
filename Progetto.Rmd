@@ -583,6 +583,8 @@ test <- anti_join(model_acc,train)
 scaling <- preProcess(train, method = c("center", "scale"))
 train <- predict(scaling,train)
 test <- predict(scaling, test)
+
+train.under <- train %>% group_by(y) %>% slice_sample(n=min(table(train$y))) %>% ungroup()
 ```
 
 Per trattare lo sbilanciamento della variabile target si costruiscono dei pesi a seconda del numero di osservazioni.
@@ -605,7 +607,6 @@ cat("Accuracy of Unbalanced Model:", 1-misClassError(test$y, yhat.glm.unbalanced
 
 ```{r}
 set.seed(1000)
-train.under <- train %>% group_by(y) %>% slice_sample(n=min(table(train$y))) %>% ungroup()
 fit.glm.under <- glm(y~., train.under, family="binomial")
 yhat.glm.under<- predict(fit.glm.under, test, type="response")
 cat("Accuracy of UnderSampling Model:", 1-misClassError(test$y, yhat.glm.under))
