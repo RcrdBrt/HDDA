@@ -688,28 +688,33 @@ La tecnica della PCA ci consente di ottenere un modello più parsimonioso avendo
 
 ### Backward Elimination
 
-```{r}
-#train.tiny <- train %>% slice_sample(n=5e4) %>% ungroup()
+Un'altra tecnica utile al contenimento del costo computazionale del modello è la Best Subset Selection, ovvero la selezione del miglior subset di regressori, nel nostro caso valutata sull'AIC. 
 
+```{r}
 fit.glm <- glm(y~., train, family="binomial")
 
-glm.backward = step(fit.glm, direction = "backward", trace=T, k=2)
-
+glm.backward <- step(fit.glm, direction = "backward", trace=T, k=2)
+step()
 fit.glm.backward <- glm(glm.backward$formula, train, family = "binomial")
 
-yhat.glm.backward = predict(fit.glm.backward, test, type="response")
+yhat.glm.backward <- predict(fit.glm.backward, test, type="response")
 
 MyConfusionMatrix(test$y, yhat.glm.backward, title = "Logit - Backward Elimination")
 
 cat("Accuracy = ", 1-misClassError(test$y, yhat.glm.backward))
 ```
 
+Sono state eliminate solamente due variabili: *pct_tl_nvr_dlq* e *num_not_sats*, dopodichè il processo di backward elimination è stato interrotto dall'*AIC stopping rule* poichè non è stato osservato un miglioramento in termini di AUC.
+
 ```{r}
 InformationValue::plotROC(test$y, yhat.glm.backward)
 ```
 
+Si osserva come l'AUC sia la stessa del modello base, tuttavia questo modello resta preferibile poichè più parsimonioso.
 
 ### Ridge
+
+Proviamo anche l'approccio di regressione penalizzata, con i metodi non-parametrici Ridge e Lasso.
 
 ```{r}
 X.train <- model.matrix(y~., train)[,-1]
@@ -718,7 +723,7 @@ fit.ridge.cv <- cv.glmnet(X.train, train$y, alpha=0, family="binomial", nfolds =
 plot(fit.ridge.cv)
 ```
 
-Perchè abbiamo usato cv.glmnet??? Perchè vogliamo mostrare come la crossvalidation sia nel nostro caso piuttosto inutile, avendo un dataset molto grande i risultati sulle varie folds sono estremamente stabili/simili. Così abbiamo giustificato l'utilizzo del metodo holdout invece della cross-validation.
+Per quanto riguarda la penalizzazione Ridge si seleziona il lambda a $1\sigma$ dal lambda "minimo" per ridurre la varianza del modello il più possibile.
 
 ```{r}
 X.test <- model.matrix(y~., test)[,-1]
@@ -729,38 +734,15 @@ MyConfusionMatrix(test$y, yhat.ridge, threshold = 0.5, title = "Ridge Logit")
 cat("Accuracy = ", 1-misClassError(test$y, yhat.ridge, threshold = 0.5))
 ```
 
-
 ```{r}
 InformationValue::plotROC(test$y, yhat.ridge)
 ```
 
-Commento.
-Grafico confronto coefficienti.
-
-Possiamo verificare ulteriormente quanto detto circa la cross-validation.
-
-```{r eval=FALSE, include=FALSE}
-K <- 10
-folds <- sample(rep(1:K, length=nrow(train)))
-
-accs <- c()
-precs <- c()
-
-for(k in 1:K){
-  fit <- glm(y ~ ., train[which(folds!=k),], family="binomial")
-  x.out=train[which(folds==k),] %>% select(-y) ### lascio fuori la "cartella" k-esima per la fase di training
-  yhat.cv=predict(fit, x.out, type="response") ### predico sulla "cartella" k-esima
-  y.out=train$y[which(folds==k)]
-  accs[k] <- 1-misClassError(y.out, yhat.cv, threshold = 0.5)
-  precs[k] <- precision(y.out, yhat.cv, threshold = 0.5)
-  print(k)
-}
-
-boxplot(accs,ylim=c(0,1))
-boxplot(precs,ylim=c(0,1))
-```
+L'AUC ci indica che siamo in presenza di un modello leggermente peggiore del modello base e del modello con backward elimination. 
 
 ### Lasso
+
+Ripetiamo quanto visto con la penalizzazione lasso.
 
 ```{r}
 K <- 10
@@ -768,8 +750,10 @@ fit.lasso.cv <- cv.glmnet(X.train, train$y, alpha=1, family="binomial", nfolds =
 plot(fit.lasso.cv)
 ```
 
+Utilizzando sempre il lambda a $1\sigma$ dal lambda "minimo" si ottiene un modello che scarta 7 variabili per intero e alcuni livelli di altre 2 variabili categoriche (*addr_state* e *purpose*).
+
 ```{r}
-cat(paste(c("Variables excluded by lasso selection are:", rownames(coef(fit.lasso.cv, s = "lambda.1se"))[(coef(fit.lasso.cv, s = "lambda.1se") == 0)[,1]]), collapse=" \n" ))
+cat(paste(c("Le variabili escluse dalla selezione Lasso sono:", rownames(coef(fit.lasso.cv, s = "lambda.1se"))[(coef(fit.lasso.cv, s = "lambda.1se") == 0)[,1]]), collapse=" \n" ))
 ```
 
 ```{r}
@@ -783,7 +767,7 @@ cat("Accuracy = ", 1-misClassError(test$y, yhat.lasso, threshold = 0.5))
 InformationValue::plotROC(test$y, yhat.lasso)
 ```
 
-La lasso e' bella!
+L'AUC è molto simile a quella dei migliori modelli già visti ma in questo caso stiamo eliminando ben 7 variabili (e oltre), quindi questo modello è sicuramente il migliore per rapporto tra performance e costo computazionale.
 
 ## Random Forest
 
@@ -821,6 +805,8 @@ fit.rf.150t$err.rate %>%
   theme(plot.title = element_text(hjust = 0.5, size = 16))
 ```
 
+Si osserva come il random forest sia ottimizzato con l'utilizzo di 7 regressori (campionati causalmente per ogni albero). Il numero di alberi utilizzati è pari a 200 ma dal secondo plot si osserva come già oltre i 150 alberi l'errore si stabilizzi.
+
 ```{r}
 fit.rf.150t$importance %>%
   cbind("Variable"=rownames(fit.rf.150t$importance)) %>%
@@ -836,7 +822,8 @@ fit.rf.150t$importance %>%
         plot.subtitle = element_text(hjust=0.5,size=12))
 ```
 
-application_type e tax_liens aumentano l'accuracy quando non sono presenti negli alberi, tuttavia la differenza è minima, per cui non vale la pena girare un nuovo modello escludendole.
+Si osserva come ci siano alcune variabili che danno un contributo nettamente più importante rispetto alle altre: 
+*int_rate*, *term*, *loan_amnt*, *dti*; tuttavia si osserva come tutte le variabili diano un conttributo positivo all'accuracy del modello.
 
 ```{r}
 yhat.rf = predict(fit.rf.150t, test %>% select(-y), type="prob", norm.votes=T)
@@ -850,13 +837,15 @@ cat("Accuracy = ", 1-misClassError(test$y, yhat.rf[,2], threshold = 0.5))
 InformationValue::plotROC(test$y, yhat.rf[,2])
 ```
 
-## Survival Analysis
+Il valore dell'AUC ci indica che siamo in presenza del miglior modello finora ottenuto in termini di performance.
+
+## Modello di Cox
 
 In order to perform survival analysis we define three possible outcomes for a lending: "Fully Paid", "Default" and "Pre-Paid", whose meanings are pretty clear.
 
 To distinguish between Regalur Payment and Early Payment we define a tolerance of -1 month since our dates are all represented as month-year.
 
-```{r}
+```{r, message=F}
 prep_surv <- function(d, plots=T){
   d <- d %>% 
     as.data.frame() %>%
@@ -942,6 +931,7 @@ fit <- survfit(Surv(actual_duration_to_term, status) ~ 1, data = train_surv)
 ggsurvplot(fit, xlab = "Years", legend= "none", ggtheme = theme_minimal())
 summary(fit, times = 0.5)
 ```
+
 #### Valutare assunzione «Proportional Hazards»
 
 Per valutare l'assunzione di Proportional Hazards per le covariate si procede dapprima con un check visuale della log(-log(Survival)), che valuta l'assunzione di PH per ogni covariata indipendentemente dalle altre, e successivamente ci si serve dei residui Schoenfeld per valutare l'assunzione di PH tenendo conto anche dalle altre covariate (modello multivariato).
@@ -1108,7 +1098,6 @@ title(main="time-dependent ROC at half term")
 
 
 
-
 ### Predictions
 
 ```{r}
@@ -1118,6 +1107,8 @@ yhat.cox.strata <- as.numeric(summary(fit.cox.strata,times=1)$surv)
 InformationValue::misClassError((1-test_surv$status), yhat.cox.strata)
 
 MyConfusionMatrix(as.factor(as.character(1-test_surv$status)), yhat.cox.strata, threshold = 0.5)
+
+plotROC(score,times=1,cens.method="local")
 ```
 
 
