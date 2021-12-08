@@ -5,6 +5,20 @@ output: html_notebook
 
 # Introduzione
 
+Il *Social Lending* è una forma di prestito erogato da privati per privati via Internet che nasce in Gran Bretagna nel 2005 e si afferma definitivamente nel mercato finanziario a seguito della crisi del 2008. Uno dei principali intermediari al mondo di Social Lending è la piattaforma *LendingClub*, che a partire dalla fondazione nel 2006 in soli 9 anni ha gestito 16 miliardi di dollari. \
+Con il presente lavoro si applicano i metodi di Statistical Learning ai dati messi a disposizione dalla piattaforma, con l'obiettivo di allenare modelli in grado di riconoscere i prestiti *"buoni"*, ovvero che saranno ripagati, da quelli *"cattivi"*. Tali modelli potranno così essere utilizzati nella definizione di strategie di investimento personalizzate, che tengano conto in maniera trasparente della propensione al rischio dell'investitore.
+
+I modelli che verranno testati sono: 
+- Regressione Logistica 
+  + base
+  + con PCA
+  + con Backward Elimination
+  + con penalizzazione Ridge
+  + con penalizzazione Lasso 
+- Random Forest 
+- Modello di Cox 
+
+La metrica che sarà utilizzata per valutare i modelli è la Precision\@K, una misura della precisione del modello avendo selezionato il numero di suggerimenti richiesti.
 
 ```{r message=FALSE, warning=FALSE, paged.print=FALSE, include=F}
 if(!require(data.table)) install.packages("data.table")
@@ -83,6 +97,38 @@ piechart <- function(d, group, legend_title = "Outcome"){
     theme_void()
 }
 
+cor.mtest <- function(mat, ...) {
+    mat <- as.matrix(mat)
+    n <- ncol(mat)
+    p.mat<- matrix(NA, n, n)
+    diag(p.mat) <- 0
+    for (i in 1:(n - 1)) {
+        for (j in (i + 1):n) {
+            tmp <- cor.test(mat[, i], mat[, j], ...)
+            p.mat[i, j] <- p.mat[j, i] <- tmp$p.value
+        }
+    }
+  colnames(p.mat) <- rownames(p.mat) <- colnames(mat)
+  p.mat
+}
+
+MyCorrelationMatrix <- function(d){
+# matrix of the p-value of the correlation
+  chart_pic_file <- tempfile(pattern="file", tmpdir=tempdir(), fileext = ".png")
+  p.mat <- cor.mtest(d)
+  col <- colorRampPalette(c("#BB4444", "#EE9988", "#FFFFFF", "#77AADD", "#4477AA"))
+  png(filename = chart_pic_file, width = 900, height = 900, type = "cairo")
+  corrplot::corrplot(cor(d), method="color", col=col(200),  
+           type="upper", 
+           addCoef.col = "black", # Add coefficient of correlation
+           tl.col="black", tl.srt=45, tl.cex = .7, number.cex=0.75,  #Text label color and rotation
+           # Combine with significance
+           p.mat = p.mat, sig.level = 0.2, insig = "blank", 
+           # hide correlation coefficient on the principal diagonal
+           diag=T 
+           )
+  chart_pic_file
+}
 
 MyConfusionMatrix <- function(actuals, predictions, threshold=0.5, title=""){
   cm <- caret::confusionMatrix(as.factor(ifelse(predictions>threshold,1,0)), actuals, threshold, dnn=c("Prediction", "Actual"), positive="1", mode="prec_recall")
@@ -176,34 +222,36 @@ plot_precision_at_k <- function(actuals, predictions, resolution_k=100){
 acc_full <- fread("archive/accepted_2007_to_2018Q4.csv", sep = ",", header = T)
 ```
 
-Il dataset utilizzato proviene da [kaggle](https://www.kaggle.com/wordsforthewise/lending-club). Sono stati considerati soltanto i prestiti che sono stati erogati contenuti nel file: accepted_2007_to_2018Q4.csv.
-In origine il dataset complessivo contiene 151 variabili e 2260701 osservazioni.
+Il dataset utilizzato proviene da [kaggle](https://www.kaggle.com/wordsforthewise/lending-club). \
+Le osservazioni del dataset rappresentano i prestiti richiesti tramite la piattaforma nel periodo 2007-2018, di questi vengono selezionati solo i prestiti che sono stati erogati (contenuti nel file: accepted_2007_to_2018Q4.csv) e si ottengono così 2,260,701 osservazioni. \
+Il numero di attributi ammonta a 151, essi descrivono le caratteristiche del prestito, tra cui: la formulazione della richiesta, la situazione finanziaria del richiedente, l'esito del prestito, ecc.
 
-{r message=FALSE, warning=FALSE, cache=TRUE, paged.print=FALSE}
+```{r message=FALSE, warning=FALSE, cache=TRUE, paged.print=FALSE}
 acc_full <- fread("archive/accepted_2007_to_2018Q4.csv", sep = ",", header = T)
+```
 
+Non tutti i 151 attributi sono utilizzabili poichè vengono aggiornati periodicamente dalla piattaforma, pertanto alcuni di essi tengono conto dell'evoluzione del prestito, informazione che ovviamente non può essere utilizzata per la costruzione di modelli di classificazione. Dopo aver studiato ciascuno dei 151 attributi ne sono stati infine selezionati 40.
 
-Di seguito viene fornito un elenco delle variabili selezionate in fase di data preparation. Al meglio delle conoscenze, esse fornite per la maggior parte dal cliente in fase di registrazione sulla piattaforma LendingClub.
-
-Variabile|Tipo|Significato
+Attributo|Tipo|Significato
 -|-|-
-addr_state|Fattore|Indica lo Stato di provenienza del richiedente
-annual_inc|Int|Il reddito annuale fornito dal richiedente
-application_type|Fattore|Un fattore esprimente se il richiedente è un individuo singolo oppure è una richiesta proveniente da più persone
-delinq_2yrs|Int|Il numero di insolvenze rateali superiori a 30 giorni segnalate negli ultimi 2 anni nel registro di credito del richiedente
+addr_state|Factor|Stato di provenienza del richiedente (USA)
+annual_inc|Int|Reddito annuale fornito dal richiedente
+application_type|Factor|Tipo di richiesta: individuale o congiunta
+delinq_2yrs|Int|Numero di insolvenze rateali superiori a 30 giorni segnalate negli ultimi 2 anni nel registro di credito del richiedente
+dti|Float|Rapporto tra debiti e reddito del richiedente
 earliest_cr_line|Date|Data in cui il richiedente ha aperto la sua prima linea di credito
 emp_length|Int|Durata dell'impiego in anni. Il valore varia tra 0 e 10, dove 10 indica 10 o più anni
-fico_range_high|Fattore|Estremo superiore dell'intervallo FICO del richiedente
-fico_range_low|Fattore|Estremo inferiore dell'intervallo FICO
-grade|Fattore|Score assegnato da parte di LendingClub al richiedente
-home_ownership|Fattore|Indica se il richiedente è proprietario di un immobile o è in affitto
-initial_list_status|Fattore|Copertura del prestito da parte di un singolo investitore o meno
-int_rate|Float|Tasso del prestito
-issue_d|Date|Data in cui i fondi sono stati erogati
-last_pymnt_d|Date|Data dell'ultimo pagamento
+fico_range_high|Factor|Estremo superiore dell'intervallo FICO del richiedente
+fico_range_low|Factor|Estremo inferiore dell'intervallo FICO del richiedente
+grade|Factor|Score assegnato da parte di LendingClub al richiedente
+home_ownership|Factor|Indica se il richiedente è proprietario di un immobile o è in affitto
+initial_list_status|Factor|Copertura del prestito da parte di un singolo investitore o meno
+int_rate|Float|Tasso annuale del prestito
+issue_d|Date|Data di emissione dei fondi (mese-anno)
+last_pymnt_d|Date|Data dell'ultimo pagamento (mese-anno)
 loan_amnt|Int|Importo richiesto
 funded_amnt|Int|Importo erogato
-loan_status|Fattore|Stato del prestito (in corso, default, in ritardo, ...)
+**loan_status**|Factor|Stato del prestito (in corso, default, in ritardo, ...), variabile target.
 mo_sin_old_il_acct|Int|Mesi trascorsi dalla più vecchia linea di credito bancaria
 mo_sin_old_rev_tl_op|Int|Mesi trascorsi dall'apertura del più vecchio conto revolving
 mort_acc|Int|Numero di mutui intestati al richiedente
@@ -219,24 +267,23 @@ percent_bc_gt_75|Int|Percentuale di carte di credito sopra al massimale di oltre
 pub_rec|Int|Numero di ritardi di pagamento
 pub_rec_bankruptcies|Factor|Numero di volte in cui il cliente ha dichiarato bancarotta
 purpose|Factor|Motivo del prestito, espresso dal richiedente
-revol_bal|Int|Saldo totale del credito revolving
-revol_util|Int|Percentuale di utilizzo del credito revolving da parte del richiedente
-sub_grade|Factor|Rate del prestito, assegnato da LendingClub
+revol_bal|Int|Saldo totale del credito revolving del richiedente
+revol_util|Float|Percentuale di utilizzo del credito revolving da parte del richiedente
+sub_grade|Factor|Score assegnato da parte di LendingClub al richiedente
 tax_liens|Int|Numero di ipoteche intestate al richiedente
 term|Int|Numero di rate, durata del prestito
 total_acc|Int|Numero di prestiti in corso al momento della richiesta
-verification_status|Factor|Informazioni fornite dal richiedente sono state verificate o meno
+verification_status|Factor|Verifica delle informazioni fornite dal richiedente
 
-```{r, cache=TRUE}
+```{r cache=TRUE, include=F}
 variables <- c(
   "addr_state",
-  #"annual_inc",
+  "annual_inc",
   "dti",
   "application_type",
   "delinq_2yrs",
   "earliest_cr_line",
   "emp_length",
-  #"emp_title", # troppi livelli, circa 600k
   "fico_range_high",
   "fico_range_low",
   "grade",
@@ -273,7 +320,7 @@ variables <- c(
 )
 ```
 
-```{r}
+```{r message=FALSE, warning=FALSE}
 acc <- acc_full
 acc <- acc[,..variables]
 acc <- acc[complete.cases(acc),]
@@ -283,17 +330,20 @@ fwrite(acc, "archive/accepted_clean.csv", sep = ",")
 
 # Data Exploration e Preparation
 
-La prima fase dello studio è quella di esplorazione dei dati ovvero una indagine preliminare delle loro caratteristiche e attributi. Mentre per le variabili numeriche è stato scelto di eliminare gli outliers che eccedavano la soglia di $3\sigma$, per le variabili categoriche è stata eseguita una analisi individuale per ogni attributo.
+Conservati gli attributi utili allo scopo ed eliminate le osservazioni con valori mancanti, si procede alla fase di esplorazione e pulizia del dataset. Per gli attributi numerici è stato scelto di eliminare gli outliers oltre la soglia di $3\sigma$ dalla media, mentre per gli attributi categorici è stata eseguita un'analisi individuale, analizzandone la numerosità dei livelli e riducendola ove fosse eccessiva. \
+In particolare l'attributo sullo stato di provenienza del richiedente (*addr_state*), è stato portato da 52 livelli a 7, rappresentanti le macro-aree geografiche degli Stati Uniti (West Coast, MidWest, ...). L'attributo *purpose* è stato portato da 15 livelli a 3, mantenendo i 2 più numerosi e accorpando tutti gli altri in *other*, eliminando così livelli presenti in poche migliaia di osservazioni.
+L'attributo *home_ownership* contiene dei livelli con poche centinaia di osservazioni, pertanto queste vengono rimosse.
+L'attributo *emp_length*, inizialmente numerico, è stato convertito in un fattore a tre livelli: low, mid, high.
+Infine l'attributo *loan_status* viene trasformato in un fattore a 2 livelli: 0 se il prestito è in stato di default o in forte ritardo, 1 se è stato rimborsato con successo.
+successo. I presetiti ancora in corso e non in forte ritardo sono invece stati rimossi.
 
-Alcune tra queste variabili selezionate offrono un'elevato numero di livelli. Data la quantità di osservazioni, sono state modificate al fine di diminuire il numero di livelli che presentano. In particolare, *loan_status* viene trasformata in un fattore a 2 livelli: 0 se il prestito è in stato di default o in forte ritardo con i pagamenti, 1 se invece è stato rimborsato con successo. Sono state rimosse tutte le osservazioni con prestiti non ancora giunti al termine e i prestiti con lieve ritardo di pagamento (al di sotto di 30 giorni).
-
-Il dataset inoltre presenta una variabile geografica (*addr_state*), indicante lo stato di provenienza del richiedente che è stata ridotta a 7 livelli raggruppanti le macro-aree geografiche degli Stati Uniti (West Coast, Midwest, ...). Un'altra motivazione per la riduzione del numero dei livelli è la riduzione dello sbilanciamento inter-classe. Ad esempio, la variabile purpose è stata ridotta da 15 a 3 livelli mantenendo i 2 più numerosi e accorpando tutti gli altri livelli (nella classe other).
+Gli attributi di tipo Date sono stati convertiti in attrbuti numerici espressi come "numero di mesi da tale data fino a dicembre 2018", per conformità ad altri attributi numerici già espressi in tale modo.
 
 ```{r message=FALSE, warning=FALSE}
 acc <- fread("archive/accepted_clean.csv", sep=",",header=T)
 acc <- as.data.frame(acc)
 numeric_variables <- c(
-  #"annual_inc",
+  "annual_inc",
   "dti",
   "delinq_2yrs",
   "mo_sin_earliest_cr_line",
@@ -345,7 +395,7 @@ acc <- acc %>%
     loan_status == "Charged Off" ~ 0,
     loan_status == "Default" ~ 0,
     loan_status == "Fully Paid" ~ 1
-  )) %>%
+  )) %>% 
   mutate(addr_state=case_when(
     addr_state %in% c("WA", "OR", "CA", "HI", "AL", "AK") ~ "West Coast",
     addr_state %in% c("MT", "ID", "NV", "UT", "CO", "WY") ~ "The Rocky Mountains",
@@ -381,9 +431,11 @@ set.seed(1000)
 source("data_preparation/outliers.R", print.eval = T)
 ```
 
-### Numero di osservazioni / tempo
+A seguito di questa prima pulizia vengono presentate alcune visualizzazioni utili alla comprensione del contesto.
 
-```{r, fig.width=10, fig.height=6}
+## Numero di osservazioni / tempo
+
+```{r fig.height=6, fig.width=10, message=FALSE, warning=FALSE}
 month_summary_with_current <- 
   acc_with_current %>% 
   group_by(issue_d) %>% 
@@ -404,80 +456,54 @@ month_summary_full <-
 
 plotly::plot_ly(month_summary_full, x = ~issue_d) %>% 
   plotly::add_trace(y = ~n_full, mode = "lines+markers", name = "All", opacity = 0.2) %>%
-  plotly::add_trace(y = ~n_current, mode = "lines+markers", name = "No Missing Values", opacity = 0.5) %>%
-  plotly::add_trace(y = ~n, mode = "lines+markers", name = "No Missing Values and No Current", opacity = 1) %>%
+  plotly::add_trace(y = ~n_current, mode = "lines+markers", name = "Senza Missing Values", opacity = 0.5) %>%
+  plotly::add_trace(y = ~n, mode = "lines+markers", name = "Senza Missing Values e Current", opacity = 1) %>%
   plotly::layout(title = "Crescita di LendingClub",  xaxis = list(title = 'Data'),
                  yaxis = list(title = 'Numero prestiti finanziati'),
                  legend = list(x=0.1,y=0.9))
+```
+
+
+```{r include=F}
 rm(acc_full)
 rm(acc_with_current)
 ```
 
-### Pie chart default vs fully paid
+Si osserva la forte espansione della piattaforma che a partire dal 2012 assume un carattere lineare, per arrivare negli anni più recenti a oltre 40,000 prestiti erogati al mese.
+Si nota come prima di agosto 2012 non siano presenti osservazioni senza valori mancanti, inoltre si nota come molti dei prestiti più recenti siano ancora in corso, poichè ciò non ci consente di conoscere il loro esito, tali prestiti sono esclusi dall'analisi.
+
+#Il lettore potrà notare una certa "mano facile" nell'eliminazione delle osservazioni... dirlo? secondo me sì, cioè dobbiamo far capire che siamo consapevoli di quello che facciamo#
+
+
+## Distribuzione Loan Status
 
 ```{r}
 piechart(acc,group="y") +
   scale_fill_manual(labels=c("Default", "Fully Paid"), values=c("darkred","darkgreen"))
 ```
 
-### ROI boxplot/violinplot (for each grade?)
+Si osserva come il dataset sia fortemente sbilanciato, infatti il 79% dei prestiti erogati viene ripagato. Questo aspetto dovrà essere tenuto di conto in fase di costruzione dei modelli.
 
-```{r}
-source("data_preparation/ROI_violin.R", print.eval = T)
-```
+## Altre Distribuzioni
 
-
-### Violin plot for each numeric variable and barplot for categorical variables
-
-```{r, fig.width=10, fig.height=6}
+```{r fig.height=6, fig.width=10, message=FALSE, warning=FALSE}
 source("data_preparation/all_violin.R", print.eval = T)
 ```
 
+Osservando le distribuzioni degli attributi numerici si nota come la rimozione degli outliers abbia avuto successo, tuttavia sono presenti distribuzioni fortemente asimmetriche. Anche alcuni attributi categorici presentano sbilanciamento dei livelli.
 
-### Investigate correlations and fix
+## Analisi della correlazione
 
+L'ultimo quesito dell'analisi esplorativa è l'eventuale presenza di correlazione tra gli attributi.
 
-```{r}
-corrplot(cor(acc[,numeric_variables]))
+```{r , out.width= '100%'}
+cor1 <- MyCorrelationMatrix(acc[,numeric_variables])
+knitr::include_graphics(cor1)
 ```
 
-```{r}
-cor.mtest <- function(mat, ...) {
-    mat <- as.matrix(mat)
-    n <- ncol(mat)
-    p.mat<- matrix(NA, n, n)
-    diag(p.mat) <- 0
-    for (i in 1:(n - 1)) {
-        for (j in (i + 1):n) {
-            tmp <- cor.test(mat[, i], mat[, j], ...)
-            p.mat[i, j] <- p.mat[j, i] <- tmp$p.value
-        }
-    }
-  colnames(p.mat) <- rownames(p.mat) <- colnames(mat)
-  p.mat
-}
-# matrix of the p-value of the correlation
-chart_pic_file = tempfile(pattern="file", tmpdir=tempdir(), fileext = ".png")
-p.mat <- cor.mtest(acc[,numeric_variables])
-col <- colorRampPalette(c("#BB4444", "#EE9988", "#FFFFFF", "#77AADD", "#4477AA"))
-png(filename = chart_pic_file, width = 900, height = 900, type = "cairo")
-corrplot::corrplot(cor(acc[,numeric_variables]), method="color", col=col(200),  
-         type="upper", 
-         addCoef.col = "black", # Add coefficient of correlation
-         tl.col="black", tl.srt=45, tl.cex = .7, number.cex=0.75,  #Text label color and rotation
-         # Combine with significance
-         p.mat = p.mat, sig.level = 0.2, insig = "blank", 
-         # hide correlation coefficient on the principal diagonal
-         diag=T 
-         )
-```
-
-```{r pressure, out.width= '100%'}
-knitr::include_graphics(chart_pic_file)
-```
-
-
-# Fix Correlation
+Dalla matrice di correlazione si osserva la presenza di un elevato numero di attributi tra loro correlati, in particolare quelli relativi alla situazione finanziaria del richiedente (conti, carte, linee di credito, ...). Poichè la presenza di tale correlazione ci condurrebbe a significatività fittizie occorre eliminarla.
+Gli attributi *fico_range_low* e *fico_range_high* hanno distanza costante su tutte le osservazioni, se ne estrae quindi la media e si procede infine a riassumerli in 5 livelli come di consuetudine ([link](https://www.investopedia.com/terms/f/ficoscore.asp)).
+Le coppie di attributi (*num_sats*, *open_acc*) e (*num_bc_sats*, *num_bc_tl*) hanno forte scorrelazione, si decide pertanto di considerare il numero di conti/carte non soddisfacenti piuttosto che quelli soddisfacenti.
 
 ```{r}
 ### categorizzazione fico_mean (https://www.investopedia.com/terms/f/ficoscore.asp)
@@ -499,7 +525,7 @@ acc <- acc %>%
 
 # tolte le correlazioni, restano queste variabili esplicative numeriche
 new_numeric_variables <- c(
-  #"annual_inc",
+  "annual_inc",
   "dti",
   "delinq_2yrs",
   "mo_sin_earliest_cr_line",
@@ -524,16 +550,16 @@ new_numeric_variables <- c(
   "tax_liens",
   "total_acc"
 )
-corrplot(cor(acc[, new_numeric_variables]))
+cor2 <- MyCorrelationMatrix(acc[,new_numeric_variables])
+knitr::include_graphics(cor2)
 ```
 
-
-# Modeling
+Permangono ancora alcuni attributi correlati che vengono quindi rimossi: *pub_rec_bankruptcies*, *num_rev_accts*, *mo_sin_old_rev_tl_op*. Si rimuovono inoltre *grade* e *sub_grade* essendo degli score attribuiti dalla piattaforma potenzialmente aggiornati a seguito dell'evoluzione del prestito.
 
 ```{r}
 model_variables <-  names(acc)[names(acc) %notin% c(
   "grade",
-  "funded_amnt",
+  "funded_amnt", # non nota al momento dell'utilizzo dei modelli
   "issue_d",
   "last_pymnt_d",
   "num_sats",
@@ -547,11 +573,11 @@ model_variables <-  names(acc)[names(acc) %notin% c(
 model_num_variables <- model_variables[model_variables %in% new_numeric_variables]
 
 model_acc <- acc[,model_variables] %>% relocate(y, .after = last_col())
-
-#model_acc[, model_num_variables] <- scale(model_acc[, model_num_variables])
-
-corrplot(cor(model_acc[, model_num_variables]))
 ```
+
+# Modeling
+
+Si procede alla costruzione di training set e test set, con metodo hold-out e rapporto 70-30. Inoltre si normalizzano le variabili numeriche.
 
 ```{r message=F}
 set.seed(1000)
@@ -563,22 +589,20 @@ train <- predict(scaling,train)
 test <- predict(scaling, test)
 ```
 
-To deal with class imbalance we define weights so that the model's predictions will be fair to both classes.
+Per trattare lo sbilanciamento della variabile target si costruiscono dei pesi a seconda del numero di osservazioni.
 
 ```{r}
 model_weights <- ifelse(train$y == "0",
                         (1/table(train$y)[1]) * 0.5, ### (1 / numero osservazioni classe 0) / 2
                         (1/table(train$y)[2]) * 0.5) ### (1 / numero osservazioni classe 1) / 2
-# sum(model_weights) == 1 TRUE
 ```
 
 ## Logistic Regression
 
-### Plain
+### Base
 
 ```{r}
 fit.glm.unbalanced <- glm(y~., train, family="binomial")
-#vif(fit.glm.unbalanced)
 yhat.glm.unbalanced <- predict(fit.glm.unbalanced, test, type="response")
 cat("Accuracy of Unbalanced Model:", 1-misClassError(test$y, yhat.glm.unbalanced))
 ```
@@ -597,7 +621,6 @@ yhat.glm.weighted <- predict(fit.glm.weighted, test, type="response")
 cat("Accuracy of Balanced Model:", 1-misClassError(test$y, yhat.glm.weighted))
 ```
 
-
 ```{r fig.width=10, fig.height=4}
 p1 <- MyConfusionMatrix(test$y, yhat.glm.unbalanced, title="Logit Unbalanced")
 p2 <- MyConfusionMatrix(test$y, yhat.glm.under, title="Logit UnderSampling")
@@ -607,14 +630,16 @@ p1+p2+p3
 ```
 
 ```{r}
-plot_precision_at_k(test$y, list("glmunbalanced"=yhat.glm.unbalanced, "glmundersampling"=yhat.glm.under, "glmweighted"=yhat.glm.weighted))
+plot_precision_at_k(test$y, list("Logit Unbalanced"=yhat.glm.unbalanced, "Logit Undersampling"=yhat.glm.under, "Logit Weighted"=yhat.glm.weighted))
 ```
 
-L'utilizzo dei pesi ci permette di avere previsioni più bilanciate. Al costo di peggiorare l'accuracy totale del nostro modello si riescono ad ottenere previsioni più attendibili sulla classe minoritaria (Default). Nonostante questo effetto sia minimo, come si nota nell'ultimo grafico, esso è presente il che ci guida verso la scelta di un train set bilanciato tramite undersampling, tramite il quale si ottengono dei modelli più efficaci e al contempo più parsimoniosi. 
+Il bilanciamento può essere eseguito tramite due approcci: l'utilizzo dei pesi o l'undersampling, ciò ci permetterà di avere previsioni più attendibili sulla classe minoritaria (*Default*), al costo tuttavia di peggiorare l'accuracy totale del nostro modello. Nonostante il guadagno sia minimo, come si nota nell'ultimo grafico osservando la distanza tra la curva verde e le altre due, esso è presente e ci guida così verso la scelta di un train set bilanciato. Il bilanciamento viene infine eseguito con tecnica di undersampling poichè porta un risultato perfettamente comparabile con l'utilizzo dei pesi ma a un costo computazionale nettamente inferiore.
 
 ```{r}
 InformationValue::plotROC(test$y, yhat.glm.under)
 ```
+
+Il modello di Regressione Logistica con undersampling ha un valore di AUC pari a 70.4%, questo è il punto partenza, infatti con tale valore confronteremo i modelli successivi per avere un'indicazione di quale sia il migliore.
 
 ```{r}
 train <- train.under
@@ -638,6 +663,8 @@ p2 <- fviz_eig(pca.res, chioce="eigenvalue", ggtheme = theme_minimal() + theme(p
 p1+p2
 ```
 
+Utilizziamo la tecnica della PCA per ridurre il numero di predittori e al contempo eliminare l'eventuale multi-collinearità residua. Vengono selezionati le componenti principali con deviazione standard maggiore di 1.0, poichè esse racchiudono più informazione delle variabili di partenza. Le sette componenti così selezionate spiegano il ~66% della varianza totale.
+
 ```{r}
 train.pca <- as.data.frame(as.matrix(train[,model_num_variables]) %*% pca.res$rotation)[,1:7] # prime sette variabili
 test.pca <- as.data.frame(as.matrix(test[,model_num_variables]) %*% pca.res$rotation)[,1:7] # prime sette variabili
@@ -660,7 +687,7 @@ cat("Accuracy = ", 1-misClassError(test.pca$y, yhat.pca))
 InformationValue::plotROC(test.pca$y, yhat.pca)
 ```
 
-Cerchiamo quindi altri metodi blah blah.
+La tecnica della PCA ci consente di ottenere un modello più parsimonioso avendo ridotto notevolmente il numero di regressori, tuttavia i risultati sono considerevolmente peggiori.
 
 ### Backward Elimination
 
@@ -683,7 +710,6 @@ cat("Accuracy = ", 1-misClassError(test$y, yhat.glm.backward))
 ```{r}
 InformationValue::plotROC(test$y, yhat.glm.backward)
 ```
-
 
 
 ### Ridge
@@ -818,7 +844,7 @@ application_type e tax_liens aumentano l'accuracy quando non sono presenti negli
 ```{r}
 yhat.rf = predict(fit.rf.150t, test %>% select(-y), type="prob", norm.votes=T)
 
-MyConfusionMatrix(test$y, yhat.rf[,2], threshold = 0.5)
+MyConfusionMatrix(test_not_norm$y, yhat.rf[,2], threshold = 0.5)
 
 cat("Accuracy = ", 1-misClassError(test$y, yhat.rf[,2], threshold = 0.5))
 ```
@@ -1098,7 +1124,7 @@ MyConfusionMatrix(as.factor(as.character(1-test_surv$status)), yhat.cox.strata, 
 ```
 
 
-# Conclusions
+# Conclusioni
 
 
 ```{r}

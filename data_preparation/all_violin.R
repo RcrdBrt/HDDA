@@ -1,7 +1,7 @@
 require(reshape2)
 require(patchwork)
 
-ids <- sample(c(1:nrow(acc)), 2e3)
+ids <- sample(c(1:nrow(acc)), 1e4)
 small_acc <- acc[ids,]
 
 GeomSplitViolin <- ggproto("GeomSplitViolin", GeomViolin,
@@ -104,7 +104,7 @@ make_violin(small_acc,numeric_variables[1:6], title="Distribuzioni")
 make_violin(small_acc,numeric_variables[7:12], title="")
 make_violin(small_acc,numeric_variables[13:18], title="")
 make_violin(small_acc,numeric_variables[19:24], title="")
-make_violin(small_acc,numeric_variables[25], title="")
+make_violin(small_acc,numeric_variables[25:27], title="")
 
 make_barplot(small_acc, c("application_type", "emp_length","grade"))
 make_barplot(small_acc, c("home_ownership", "initial_list_status", "purpose"))
