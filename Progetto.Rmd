@@ -3,7 +3,8 @@ title: "Progetto HDDA AA2021/2022"
 output: html_notebook
 ---
 
-# Libraries
+# Introduzione
+
 
 ```{r message=FALSE, warning=FALSE, paged.print=FALSE, include=F}
 if(!require(data.table)) install.packages("data.table")
@@ -280,11 +281,15 @@ acc <- acc[!apply(acc, 1, function(x) any(x=="")),]
 fwrite(acc, "archive/accepted_clean.csv", sep = ",")
 ```
 
-# Data Preparation
+# Data Exploration e Preparation
 
-Dopo un'attenta analisi, alcune tra le variabili categoriche selezionate offrono un'elevato numero di livelli. Data la quantità di osservazioni, si modificano alcune variabili al fine di diminuire il numero di livelli che presentano. In particolare, loan_status viene trasformata in un fattore a 2 livelli: 0 se il prestito è in stato di default o in forte ritardo con i pagamenti, 1 se invece è stato rimborsato con successo. Il dataset inoltre presenta una variabile geografica (addr_state), indicante lo stato di provenienza del richiedente che è stata ridotta a 7 livelli raggruppanti le macro-aree geografiche degli Stati Uniti (West Coast, Midwest, ...). Un'altra motivazione per la riduzione del numero dei livelli è la riduzione dello sbilanciamento inter-classe. Ad esempio, la variabile purpose è stata ridotta da 15 a 3 livelli mantenendo i 2 più numerosi e accorpando tutti gli altri livelli (nella classe other).
+La prima fase dello studio è quella di esplorazione dei dati ovvero una indagine preliminare delle loro caratteristiche e attributi. Mentre per le variabili numeriche è stato scelto di eliminare gli outliers che eccedavano la soglia di $3\sigma$, per le variabili categoriche è stata eseguita una analisi individuale per ogni attributo.
 
-```{r}
+Alcune tra queste variabili selezionate offrono un'elevato numero di livelli. Data la quantità di osservazioni, sono state modificate al fine di diminuire il numero di livelli che presentano. In particolare, *loan_status* viene trasformata in un fattore a 2 livelli: 0 se il prestito è in stato di default o in forte ritardo con i pagamenti, 1 se invece è stato rimborsato con successo. Sono state rimosse tutte le osservazioni con prestiti non ancora giunti al termine e i prestiti con lieve ritardo di pagamento (al di sotto di 30 giorni).
+
+Il dataset inoltre presenta una variabile geografica (*addr_state*), indicante lo stato di provenienza del richiedente che è stata ridotta a 7 livelli raggruppanti le macro-aree geografiche degli Stati Uniti (West Coast, Midwest, ...). Un'altra motivazione per la riduzione del numero dei livelli è la riduzione dello sbilanciamento inter-classe. Ad esempio, la variabile purpose è stata ridotta da 15 a 3 livelli mantenendo i 2 più numerosi e accorpando tutti gli altri livelli (nella classe other).
+
+```{r message=FALSE, warning=FALSE}
 acc <- fread("archive/accepted_clean.csv", sep=",",header=T)
 acc <- as.data.frame(acc)
 numeric_variables <- c(
@@ -375,10 +380,6 @@ acc <- acc %>%
 set.seed(1000)
 source("data_preparation/outliers.R", print.eval = T)
 ```
-
-Possiamo pensare di utilizzare anche i Current tipo con 90% già ripagato. Ma ci servono? No!
-
-# Data Exploration
 
 ### Numero di osservazioni / tempo
 
