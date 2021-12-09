@@ -691,10 +691,14 @@ La tecnica della PCA ci consente di ottenere un modello più parsimonioso avendo
 Un'altra tecnica utile al contenimento del costo computazionale del modello è la Best Subset Selection, ovvero la selezione del miglior subset di regressori, nel nostro caso valutata sull'AIC. 
 
 ```{r}
+2
+```
+
+```{r}
 fit.glm <- glm(y~., train, family="binomial")
 
 glm.backward <- step(fit.glm, direction = "backward", trace=T, k=2)
-step()
+
 fit.glm.backward <- glm(glm.backward$formula, train, family = "binomial")
 
 yhat.glm.backward <- predict(fit.glm.backward, test, type="response")
@@ -828,7 +832,7 @@ Si osserva come ci siano alcune variabili che danno un contributo nettamente pi�
 ```{r}
 yhat.rf = predict(fit.rf.150t, test %>% select(-y), type="prob", norm.votes=T)
 
-MyConfusionMatrix(test_not_norm$y, yhat.rf[,2], threshold = 0.5)
+MyConfusionMatrix(test$y, yhat.rf[,2], threshold = 0.5)
 
 cat("Accuracy = ", 1-misClassError(test$y, yhat.rf[,2], threshold = 0.5))
 ```
@@ -1040,6 +1044,7 @@ summary(model.cox.strata)
 ### Functional form of contiuous variables
 
 ```{r}
+library(splines)
 mar.res<-resid(model.cox.base,type='martingale')
 
 for (variable in model_num_variables){
@@ -1096,13 +1101,18 @@ plotROC(score,times=0.9,cens.method="local")
 title(main="time-dependent ROC at half term")
 ```
 
-
-
 ### Predictions
 
 ```{r}
-fit.cox.strata<-survfit(model.cox.strata,newdata=test_surv)
-yhat.cox.strata <- as.numeric(summary(fit.cox.strata,times=1)$surv)
+#rm(list=setdiff(ls(), c("train_surv", "test_surv", "train", "test", "yhat.glm.under", "yhat.backward", "yhat.lasso", "yhat.ridge", "yhat.rf", "model.cox.base", "model.cox.strata")))
+
+yhat.cox.strata <- c()
+for (i in (seq(1,nrow(test_surv),ceiling(nrow(test_surv)/10))-1)){
+  fit.cox.strata<-survfit(model.cox.strata,newdata=test_surv[(i+1):(i+ceiling(nrow(test_surv)/10)),])
+  yhat <- as.numeric(summary(fit.cox.strata,times=1)$surv)
+  yhat.cox.strata <- c(yhat.cox.strata,yhat)
+  print(paste0("Processed ", i/nrow(test_surv)*100, "%"))
+}
 
 InformationValue::misClassError((1-test_surv$status), yhat.cox.strata)
 
@@ -1136,13 +1146,10 @@ plotCalibration(score,times=0.5, cens.method="local",method="quantile", q=20, au
 title(main="Calibration at half term")
 ```
 
-```{r fig.height=6, fig.width=10}
-plot_precision_vs_npred(test$y, list("glm"=yhat.glm.under, "pca"=yhat.pca, "backward"=yhat.glm.backward, "ridge"=yhat.ridge, "lasso"=yhat.lasso,"RandomForest"=yhat.rf[,2], "Cox"=yhat.cox), title = "Results")
+```{r fig.width=10, fig.height=6}
+plot_precision_at_k(test$y, list("Logit UnderSampling"=yhat.glm.under, "Logit PCA"=yhat.pca, "Logit Backward Elimination"=yhat.glm.backward, "Logit Ridge"=unname(yhat.ridge), "Logit Lasso"=unname(yhat.lasso),"Random Forest"=yhat.rf[,2], "Cox"=yhat.cox.strata))
 ```
 
-```{r fig.width=10, fig.height=6}
-plot_precision_at_k(test$y, list("under"=yhat.glm.under, "unbal"=yhat.glm.unbalanced, "weighted"=yhat.glm.weighted))
-```
 
 ```{r}
 stopCluster(cl)
