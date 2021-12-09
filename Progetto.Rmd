@@ -1,6 +1,11 @@
 ---
 title: "Progetto HDDA AA2021/2022"
-output: html_notebook
+author: "Berto, Sauro, Venturi"
+date: "9 dicembre 2021"
+output: 
+  html_notebook:
+    toc: true 
+    toc_depth: 3 
 ---
 
 # Introduzione
@@ -80,8 +85,6 @@ library(car)
 `%notin%` <- Negate(`%in%`)
 
 registerDoMC(cores = detectCores())
-#cl = makePSOCKcluster(detectCores())
-#registerDoParallel(cl)
 
 piechart <- function(d, group, legend_title = "Outcome"){
   piepercent <- d %>% 
@@ -429,7 +432,7 @@ source("data_preparation/outliers.R", print.eval = T)
 
 A seguito di questa prima pulizia vengono presentate alcune visualizzazioni utili alla comprensione del contesto.
 
-## Numero di osservazioni / tempo
+## Numero di osservazioni / tempo 
 
 ```{r fig.height=6, fig.width=10, message=FALSE, warning=FALSE}
 month_summary_with_current <- 
@@ -467,9 +470,6 @@ rm(acc_with_current)
 
 Si osserva la forte espansione della piattaforma che a partire dal 2012 assume un carattere lineare, per arrivare negli anni più recenti a oltre 40,000 prestiti erogati al mese.
 Si nota come prima di agosto 2012 non siano presenti osservazioni senza valori mancanti, inoltre si nota come molti dei prestiti più recenti siano ancora in corso, poichè ciò non ci consente di conoscere il loro esito, tali prestiti sono esclusi dall'analisi.
-
-#Il lettore potrà notare una certa "mano facile" nell'eliminazione delle osservazioni... dirlo? secondo me sì, cioè dobbiamo far capire che siamo consapevoli di quello che facciamo#
-
 
 ## Distribuzione Loan Status
 
@@ -642,6 +642,36 @@ Il modello di Regressione Logistica con undersampling ha un valore di AUC pari a
 train <- train.under
 ```
 
+Si osservi la scelta di utilizzare il metodo Hold-Out per ottenere le previsioni invece della più diffusa CrossValidation ($k\ge3$), ciò è stato fatto consapevolmente al fine di contenere il costo computazionale.
+Avendo a disposizione un dataset di circa 800,000 osservazioni, senza outliers, la creazione di, ad esempio, 20 folds avrebbe condotto a modelli molto robusti in fase di training (~270,000 ossservazioni nel training set) e molto stabili anche in fase di test (~14,000 osservazioni nel test set). \
+Per riprova possiamo mostrare questo effetto utilizzando una CrossValidation 20-folds sul Modello Logit base.
+
+```{r eval=FALSE, include=FALSE}
+K <- 20
+folds <- sample(rep(1:K, length=nrow(train)))
+accs <- c()
+precs <- c()
+for(k in 1:K){
+  fit <- glm(y ~ ., train[which(folds!=k),], family="binomial")
+  x.out=train[which(folds==k),] %>% select(-y) ### lascio fuori la "cartella" k-esima per la fase di training
+  yhat.cv=predict(fit, x.out, type="response") ### predico sulla "cartella" k-esima
+  y.out=train$y[which(folds==k)]
+  accs[k] <- 1-misClassError(y.out, yhat.cv, threshold = 0.8)
+  precs[k] <- precision(y.out, yhat.cv, threshold = 0.8)
+  print(k)
+}
+
+cat("Accuracy at 95% C.I for a 20-fold Crossvalidation:", round(mean(accs),5), "±", round(1.960*sd(accs)/sqrt(nrow(train)/K),5),"\n")
+
+cat("Precision at 95% C.I for a 20-fold Crossvalidation:", round(mean(precs),5), "±", round(1.960*sd(precs)/sqrt(round(nrow(train))/K),5))
+```
+
+Si ottiene effettivamente una previsione estramemente stabile, ad esempio con threshold a 0.8:
+- Accuracy con C.I. al 95%: $(53.114 \pm 0.006)\%$
+- Precision con C.I. al 95%: $(87.27 \pm 0.02)\%$
+
+Non essendoci motivo di ritenere che gli altri modelli assumano un comportamento diverso, si procede utilizzando il metodo hold-out.
+
 ### PCA
 
 ```{r}
@@ -689,10 +719,6 @@ La tecnica della PCA ci consente di ottenere un modello più parsimonioso avendo
 ### Backward Elimination
 
 Un'altra tecnica utile al contenimento del costo computazionale del modello è la Best Subset Selection, ovvero la selezione del miglior subset di regressori, nel nostro caso valutata sull'AIC. 
-
-```{r}
-2
-```
 
 ```{r}
 fit.glm <- glm(y~., train, family="binomial")
@@ -754,7 +780,7 @@ fit.lasso.cv <- cv.glmnet(X.train, train$y, alpha=1, family="binomial", nfolds =
 plot(fit.lasso.cv)
 ```
 
-Utilizzando sempre il lambda a $1\sigma$ dal lambda "minimo" si ottiene un modello che scarta 7 variabili per intero e alcuni livelli di altre 2 variabili categoriche (*addr_state* e *purpose*).
+Utilizzando sempre il lambda a $1\sigma$ dal lambda "minimo" si ottiene un modello che scarta 8 variabili per intero e alcuni livelli di altre 2 variabili categoriche (*addr_state* e *purpose*).
 
 ```{r}
 cat(paste(c("Le variabili escluse dalla selezione Lasso sono:", rownames(coef(fit.lasso.cv, s = "lambda.1se"))[(coef(fit.lasso.cv, s = "lambda.1se") == 0)[,1]]), collapse=" \n" ))
@@ -774,6 +800,10 @@ InformationValue::plotROC(test$y, yhat.lasso)
 L'AUC è molto simile a quella dei migliori modelli già visti ma in questo caso stiamo eliminando ben 7 variabili (e oltre), quindi questo modello è sicuramente il migliore per rapporto tra performance e costo computazionale.
 
 ## Random Forest
+
+Si prova adesso un modello di Random Forest. Dapprima si ricerca il parametro *mtry* migliore, ovvero il miglior numero di regressori che deve contenere ciascun albero, utilizzando un'architettura con 50 alberi e sottocampionando il training set per rendere più veloce la computazione. Ottenuto il valore ottimale di *mtry* si costruisce un Random Forest con 200 alberi e si riaumenta la dimensione del training set. \
+Entrambi i Random Forest utilizzano la tecnica *Bootstrap* per ricampionare il training set per ciascun albero e la dimensione di ciascun campione bootstrap coincide con la dimensione del training set. Questa tecnica permette di ottenere alberi più incorrelati tra di loro e di conseguenza di ridurre il termine di varianza dell'errore.
+Infine viene utilizzata la tecnica del *Bagging* per ottenere i risultati finali a partire da quelli di ciascuno dei 200 alberi.
 
 ```{r}
 customTuneRF<- function (data, ntree, mtryStart){
@@ -809,7 +839,8 @@ fit.rf.150t$err.rate %>%
   theme(plot.title = element_text(hjust = 0.5, size = 16))
 ```
 
-Si osserva come il random forest sia ottimizzato con l'utilizzo di 7 regressori (campionati causalmente per ogni albero). Il numero di alberi utilizzati è pari a 200 ma dal secondo plot si osserva come già oltre i 150 alberi l'errore si stabilizzi.
+Si osserva come il Random Forest minimizzi l'errore di previsione con l'utilizzo di 4 regressori (campionati causalmente per ogni albero). Il sottocampionamento dell'insieme dei predittori permette di ottenere alberi meno correlati tra loro, con l'effetto di contenere così la varianza e quindi l'errore di previsione
+Il numero di alberi utilizzati è pari a 200 ma dal secondo plot si osserva come già oltre i 150 alberi l'errore si stabilizzi.
 
 ```{r}
 fit.rf.150t$importance %>%
@@ -827,7 +858,7 @@ fit.rf.150t$importance %>%
 ```
 
 Si osserva come ci siano alcune variabili che danno un contributo nettamente più importante rispetto alle altre: 
-*int_rate*, *term*, *loan_amnt*, *dti*; tuttavia si osserva come tutte le variabili diano un conttributo positivo all'accuracy del modello.
+*int_rate*, *term*, *loan_amnt*, *dti*; tuttavia si osserva come tutte le variabili diano un contributo positivo all'accuracy del modello.
 
 ```{r}
 yhat.rf = predict(fit.rf.150t, test %>% select(-y), type="prob", norm.votes=T)
@@ -841,7 +872,7 @@ cat("Accuracy = ", 1-misClassError(test$y, yhat.rf[,2], threshold = 0.5))
 InformationValue::plotROC(test$y, yhat.rf[,2])
 ```
 
-Il valore dell'AUC ci indica che siamo in presenza del miglior modello finora ottenuto in termini di performance.
+Il valore dell'AUC ci indica che siamo in presenza del miglior modello fin'ora ottenuto in termini di performance.
 
 ## Modello di Cox
 
@@ -912,12 +943,6 @@ ret$pie
 
 ### Survival function
 
-```{r}
-fit <- survfit(Surv(actual_duration_to_term, status) ~ 1, data = train_surv)
-ggsurvplot(fit, xlab = "Years", legend= "none", ggtheme = theme_minimal())
-summary(fit, times = 0.5)
-```
-
 ### Cox
 
 ```{r}
@@ -931,9 +956,9 @@ train_surv <- train_surv %>% group_by(status) %>% slice_sample(n=min(table(train
 ```
 
 ```{r}
-fit <- survfit(Surv(actual_duration_to_term, status) ~ 1, data = train_surv)
-ggsurvplot(fit, xlab = "Years", legend= "none", ggtheme = theme_minimal())
-summary(fit, times = 0.5)
+surv.cox <- survfit(Surv(actual_duration_to_term, status) ~ 1, data = train_surv)
+ggsurvplot(surv.cox, xlab = "Years", legend= "none", ggtheme = theme_minimal())
+summary(surv.cox, times = 0.5)
 ```
 
 #### Valutare assunzione «Proportional Hazards»
@@ -952,7 +977,7 @@ ne segue che la differenza tra i due logaritmi è costante rispetto al tempo se 
 
 Questo tipo di verifica può essere fatto unicamente sulle variabili non continue, poiché il $log(-log(S_0(t)))$ deve essere confrontato con $log(-log(S_X(t)))$ per ciascun valore di X su tutto l'intervallo temporale.
 
-```{r}
+```{r include=F}
 par(mfrow=c(2,2),mar=c(4,4,2,2))
 
 km.addr_state <- survfit(Surv(actual_duration_to_term, status) ~ addr_state, data=train_surv)
@@ -983,13 +1008,13 @@ km.fico_class <- survfit(Surv(actual_duration_to_term, status) ~ fico_class, dat
 plot(km.fico_class, fun="cloglog", ylab="log(-log(Survival))", xlab="log(time_to_term)", main="Check PH assumption of fico class")
 ```
 
-L'assunzione di PH pare valere per tutte le variabili categoriche, mentre sembra che non valga per la "fico class".
+L'assunzione di PH pare valere per tutte le variabili categoriche, ad eccezione di *fico_class*.
 
 ##### 2. Schoenfeld residuals --- Graphical check
 
 I residui Schoenfeld sono definiti come: $r_j = x_j - E[x_j|R_j]$ \
-dove $x_j$ è la covariata dell'individuo che *fallisce* al tempo $t_{(j)}$ e $R_j$ è il risk set al tempo $t_{(j)}$.
-Ci si aspetta che il valore atteso dei residui sia 0, ne segue che l'andamento dei residui rispetto al tempo deve essere costante. Si plottano i residui Schoenfeld standardizzati.
+dove $x_j$ è la covariata del prestito che *fallisce* al tempo $t_{(j)}$ e $R_j$ è il risk set al tempo $t_{(j)}$.
+Ci si aspetta che il valore atteso dei residui sia 0, ne segue che l'andamento dei residui rispetto al tempo deve quantomeno essere costante. Si plottano i residui Schoenfeld standardizzati.
 
 
 ```{r}
@@ -1000,11 +1025,7 @@ par(mfrow=c(3,3),mar=c(4,4,2,2))
 plot(czph, resid=FALSE)
 ```
 
-Per molte variabili non vale l'assunzione di PH, le escludiamo. Alcune, sebbene graficamente sarebbero da escludere, sono invece tenute per via della scala.
-
-###
-Ad esempio beta(t) di annual_inc è chiaramente non costante, tuttavia la variazione avviene su un ordine di grandezza di 1e-6 !!! 
-###
+Per molte variabili non vale l'assunzione di PH, le variabili numeriche vengono così escluse mentre per le variabili categoriche si crea un modello stratificato.
 
 ```{r}
 train_ph <- train_surv %>% select(-application_type, -initial_list_status, -int_rate, -num_rev_tl_bal_gt_0, -pct_tl_nvr_dlq, -purpose, -revol_bal, -revol_util, -term, -total_acc, -verification_status, -mo_sin_earliest_cr_line, -num_bc_not_sats, -home_ownership, -addr_state)
@@ -1040,65 +1061,11 @@ model.cox.strata <- coxph(
 summary(model.cox.strata)
 ```
 
-
-### Functional form of contiuous variables
-
-```{r}
-library(splines)
-mar.res<-resid(model.cox.base,type='martingale')
-
-for (variable in model_num_variables){
-  ms <- coxph(Surv(actual_duration_to_term, status>0) ~ ns(eval(as.name(variable)),knots=c(-1,0,1)), data = train_surv) # ns natural cubic splines, e knots sono i nodi delle splines.
-  pred <- predict(ms, type="terms", se=TRUE) # terms indica che voglio beta * x
-  hfit <- pred$fit[,1]
-  hse <- pred$se[,1]
-  hmat <- cbind(hfit, hfit+1.96*hse,hfit-1.96*hse)
-  o <- order(train_surv[[variable]])
-  matplot(train_surv[[variable]][o], hmat[o, ], pch="*",col=c("red","orangered","orangered"), lwd=c(2,1,1),xlab = variable, ylab="log hazard ratio",main=paste("Check functional form of",variable),type="l")
-  
-  ms <- coxph(Surv(actual_duration_to_term, status) ~ eval(as.name(variable)), data = train_surv) # ns natural cubic splines, e knots sono i nodi delle splines.
-  pred <- predict(ms, type="terms", se=TRUE) # terms indica che voglio beta * x
-  hfit <- pred$fit[,1]
-  hse <- pred$se[,1]
-  hmat <- cbind(hfit, hfit+1.96*hse,hfit-1.96*hse)
-  o <- order(train_surv[[variable]])
-  matplot(train_surv[[variable]][o], hmat[o, ], pch="*",col=c("blue","cornflowerblue","cornflowerblue"), lwd=c(2,1,1),type="l", add=T)
-  legend("topright",c("natural spline","linear"),col=c(2,4),lwd=2,bty="n")
-}
-```
-
-### Calibration
-
-Si procede con la costruzione dei modelli, specificando l'opzione x = TRUE per poter poi utilizzare la funzione Score del pacchetto riskRegression.
-Creo un modello aumentato con le variabili per cui non vale PH.
-
-
-```{r}
-score <- Score(list("PH model"=model.cox.ph,"Stratified Model"=model.cox.strata),
-              formula=Surv(actual_duration_to_term, status)~1,
-              data=train_surv, conf.int=F,
-              times=seq(0.1,0.9,0.2),
-              plots=c("calibration","ROC"),
-              progress.bar=1)
-```
-
-Si decide di prendere il time-point a metà del termine e si valutano le performance dei modelli sui tre aspetti: calibrazione, discriminazione, net benefit.
-
-Per valutare la calibrazione dei modelli si usano insieme il Calibration Plot e il Brier Score.
-
-```{r}
-plotCalibration(score,times=0.5, cens.method="local",method="quantile", q=20, auc.in.legend = F)
-title(main="Calibration at half term")
-```
-
 ### Discrimination
 
 ```{r}
-plotROC(score,times=0.1,cens.method="local")
-plotROC(score,times=0.5,cens.method="local")
-plotROC(score,times=0.9,cens.method="local")
-
-title(main="time-dependent ROC at half term")
+plotROC(score,times=1,cens.method="local")
+title(main="Time-dependent ROC at end of lending")
 ```
 
 ### Predictions
@@ -1121,12 +1088,17 @@ MyConfusionMatrix(as.factor(as.character(1-test_surv$status)), yhat.cox.strata, 
 plotROC(score,times=1,cens.method="local")
 ```
 
+Il modello è il peggiore ottenuto, ciò non stupisce poichè è stata tenuta fuori la variabile *int_rate* risultata finora la più significativa. Tale variabile, insieme alle altre variabili numeriche per cui non vale l'assunzione di PH, può essere reinserita nel modello con un termine di interazione con la variabile temporale, ciò si lascia a una possibile futura implementazione.
 
 # Conclusioni
 
+I modelli ottenuti hanno dimostrato tutti una discreta performance, che è stata finora valutata in termini di AUC e di Precision alla threshold di 0.5. \
+I modelli possono essere visti come dei Recommender Systems, ovvero sistemi che offrono raccomandazioni su quali prestiti scegliere per investire. La metrica che viene utilizzata per la valutazione finale è di conseguenza la metrica tipica di questo tipo di sistemi, ovvero la Precision\@K. Avendo l'utente scelto un valore K di investimenti su cui puntare, il modello ritorna i K prestiti la cui probabilità di essere ripagati è massima, di questi K investimenti si valuta la Precision ovvero il numero di quelli che vengono effettivamente ripagati. 
+
+Forse si riesce a fare anche i calibration plot.
 
 ```{r}
-score <- Score(list("LogReg"=fit.glm,
+score <- Score(list("LogReg"=fit.glm.under,
                     "LogReg PCA"=fit.pca,
                     "LogRidge"=fit.ridge.cv,
                     "LogRegLasso"=fit.lasso.cv,
@@ -1136,7 +1108,7 @@ score <- Score(list("LogReg"=fit.glm,
               plots=c("calibration","ROC"),
               progress.bar=1)
 
-score <- Score(list("LogReg"=fit.glm),
+score <- Score(list("Cox"=fit.cox.strata),
               formula=y~1,
               data=test, conf.int=F,
               plots=c("calibration","ROC"),
@@ -1150,8 +1122,22 @@ title(main="Calibration at half term")
 plot_precision_at_k(test$y, list("Logit UnderSampling"=yhat.glm.under, "Logit PCA"=yhat.pca, "Logit Backward Elimination"=yhat.glm.backward, "Logit Ridge"=unname(yhat.ridge), "Logit Lasso"=unname(yhat.lasso),"Random Forest"=yhat.rf[,2], "Cox"=yhat.cox.strata))
 ```
 
+In questo plot l'asse x superiore riporta il valore del K aspettato, ovvero il valore corrispondente alla percentuale del test set nel caso in cui si avessero 40,000 prestiti tra cui scegliere. Il valore di 40,000 è stato scelto avendo osservato il plot nella sezione 'Numero di osservazioni / tempo' e avendo notato come negli ultimi anni vengono accettati circa 40,000 prestiti al mese, poichè tale valore è in crescita (~lineare) da più di 6 anni ci si aspetta di trovare almeno questo numero di prestiti ogni mese su cui investire.
 
-```{r}
-stopCluster(cl)
-```
+Si osserva come il Modello di Cox e la Regressione Logistica con PCA conducono alle previsioni peggiori, mentre gli altri modelli hanno tutti performance molto simili e il migliore dipende dal valore di K scelto, tale comportamento ci induce a scegliere il modello più parsimonioso e più interpretabile. La richiesta di interpretabilità sicuramente porta ad escludere il Random Forest, poichè questo si comporta come una *black box*, mentre gli altri modelli di regressione logistica hanno tutti lo stesso grado di interpretabilità. Valutando questi modelli in grado di parsimonia, il migliore risulta essere la Regressione Logistica con Penalizzazione Lasso, poichè non solo comprime i coefficienti (come la Ridge) ma ne seleziona anche un sottoinsieme, escludendone ben 8 (contro i 4 della Backward Selection), qualificandosi così come il modello più parsimonioso.
+
+Supponendo quindi di voler fare 100 investimenti la precision aspettata è pari al 98%, ci si aspetta quindi di suggire 98 prestiti che saranno restituiti e 2 prestiti che non saranno restituiti. Da tenere a mente come il modello random avrebbe avuto una Precision\@K costante su K e pari alla prevalenza della classe 'Fully Paid', ovvero il 79.2%.
+
+# Sviluppi Futuri
+
+Il modello infine ottenuto porta risultati eccellenti, è infatti in grado di suggerire con alta confidenza quali prestiti siano i migliori per investire, tuttavia questo suggerimento tiene di conto unicamente della probabilità che il prestito sia ripagato ma non tiene altresì conto del tasso di interesse sul prestito ovvero del Return On Investment (ROI). Per rispondere completamente alle esigenze del cliente si potrà aggiungere questa informazione al modello e considerare piuttosto che la probabilità del prestito di essere ripagato, il ROI aspettato ($probabilità \times RO$I). Infine sarà così possibile definire delle strategie di investimento su misura per i clienti.
+
+Per il futuro è inoltre interessante approfondire il modello di Cox, risultato in questa prima fase il modello peggiore ma considerato quello con più potenzialità, infatti questo a differenza degli altri modelli tiene conto del variabile temporale ed è in grado di offrire previsioni legate proprio al tempo. Ciò offre la possibilità di poter scegliere investimenti con tasso di interesse elevato e che potenzialmente andranno in Default, ma dopo un periodo sufficiente ad aver ottenuto i ricavi desiderati. 
+
+
+
+
+
+
+
 

@@ -56,9 +56,9 @@ geom_split_violin <- function(mapping = NULL, data = NULL, stat = "ydensity", po
         params = list(trim = trim, scale = scale, draw_quantiles = draw_quantiles, na.rm = na.rm, ...))
 }
 
-make_violin <- function(data=acc, variables, title="Distribuzioni"){
-  ggplot(reshape2::melt(small_acc %>% select(all_of(variables))), aes(x = variable, y = value, fill = variable)) + 
-    geom_violin(trim = T) +
+make_violin <- function(data, variables, title="Distribuzioni", trim=T){
+  ggplot(reshape2::melt(data %>% select(all_of(variables))), aes(x = variable, y = value, fill = variable)) + 
+    geom_violin(trim = trim) +
     geom_boxplot(width=0.1) +
     facet_wrap(~variable, scales = "free", strip.position="bottom") +
     ggtitle(title) +
@@ -71,11 +71,11 @@ make_violin <- function(data=acc, variables, title="Distribuzioni"){
           strip.text = element_text(size=20,face="bold"))
 }
 
-make_barplot <- function(data=acc, variables, title="Distribuzioni"){
+make_barplot <- function(data, variables, title="Distribuzioni"){
   p <- list()
   for (i in 1:length(variables)){
     p[[i]] <- 
-      ggplot(small_acc, aes_string(x = 1, fill = variables[i])) + 
+      ggplot(data, aes_string(x = 1, fill = variables[i])) + 
       geom_bar(position = "fill", width = 0.3) +
       scale_y_continuous(labels = scales::percent) +
       ggtitle(variables[i]) +
