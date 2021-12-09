@@ -11,7 +11,7 @@ output:
 # Introduzione
 
 Il *Social Lending* è una forma di prestito erogato da privati per privati via Internet che nasce in Gran Bretagna nel 2005 e si afferma definitivamente nel mercato finanziario a seguito della crisi del 2008. Uno dei principali intermediari al mondo di Social Lending è la piattaforma *LendingClub*, che a partire dalla fondazione nel 2006 in soli 9 anni ha gestito 16 miliardi di dollari. \
-Con il presente lavoro si applicano i metodi di Statistical Learning ai dati messi a disposizione dalla piattaforma, con l'obiettivo di allenare modelli in grado di riconoscere i prestiti *"buoni"*, ovvero che saranno ripagati, da quelli *"cattivi"*. Tali modelli potranno così essere utilizzati nella definizione di strategie di investimento personalizzate, che tengano conto in maniera trasparente della propensione al rischio dell'investitore.
+Con il presente lavoro si applicano i metodi di Statistical Learning ai dati messi a disposizione dalla piattaforma, con l'obiettivo di allenare modelli in grado di riconoscere i prestiti *"buoni"*, ovvero che saranno ripagati, da quelli *"cattivi"*. Si pongono così le basi per la creazione di un prodotto che suggerisca al cliente delle strategie di investimento personalizzate, che tengano conto in maniera trasparente della propensione al rischio dell'investitore.
 
 I modelli che verranno testati sono: 
 - Regressione Logistica 
@@ -22,8 +22,6 @@ I modelli che verranno testati sono:
   + con penalizzazione Lasso 
 - Random Forest 
 - Modello di Cox 
-
-La metrica che sarà utilizzata per valutare i modelli è la Precision\@K, una misura della precisione del modello avendo selezionato il numero di suggerimenti richiesti.
 
 ```{r message=FALSE, warning=FALSE, paged.print=FALSE, include=F}
 if(!require(data.table)) install.packages("data.table")
@@ -53,6 +51,7 @@ if(!require(riskRegression)) install.packages("riskRegression")
 if(!require(parallel)) install.packages("doParallel")
 if(!require(doMC)) install.packages("doMC")
 if(!require(patchwork)) install.packages("patchwork")
+if(!require(reshape2)) install.packages("reshape2")
 
 library(data.table)
 library(tibble)
@@ -86,136 +85,7 @@ library(car)
 
 registerDoMC(cores = detectCores())
 
-piechart <- function(d, group, legend_title = "Outcome"){
-  piepercent <- d %>% 
-    group_by((!!sym(group))) %>% 
-    summarise(n_group = n()) %>% 
-    mutate(n_perc= round( n_group/nrow(d)* 100,2))
-  
-  ggplot(piepercent, aes(x = "", y = n_perc, fill = !!sym(group))) +
-    geom_bar(width = 1, stat = "identity", color = "white") +
-    coord_polar("y", start = 0) +
-    geom_text(aes(label = n_perc), position = position_stack(vjust = 0.5),color = "white")+
-    guides(fill=guide_legend(title=legend_title))+
-    theme_void()
-}
-
-cor.mtest <- function(mat, ...) {
-    mat <- as.matrix(mat)
-    n <- ncol(mat)
-    p.mat<- matrix(NA, n, n)
-    diag(p.mat) <- 0
-    for (i in 1:(n - 1)) {
-        for (j in (i + 1):n) {
-            tmp <- cor.test(mat[, i], mat[, j], ...)
-            p.mat[i, j] <- p.mat[j, i] <- tmp$p.value
-        }
-    }
-  colnames(p.mat) <- rownames(p.mat) <- colnames(mat)
-  p.mat
-}
-
-MyCorrelationMatrix <- function(d){
-# matrix of the p-value of the correlation
-  chart_pic_file <- tempfile(pattern="file", tmpdir=tempdir(), fileext = ".png")
-  p.mat <- cor.mtest(d)
-  col <- colorRampPalette(c("#BB4444", "#EE9988", "#FFFFFF", "#77AADD", "#4477AA"))
-  png(filename = chart_pic_file, width = 900, height = 900, type = "cairo")
-  corrplot::corrplot(cor(d), method="color", col=col(200),  
-           type="upper", 
-           addCoef.col = "black", # Add coefficient of correlation
-           tl.col="black", tl.srt=45, tl.cex = .7, number.cex=0.75,  #Text label color and rotation
-           # Combine with significance
-           p.mat = p.mat, sig.level = 0.2, insig = "blank", 
-           # hide correlation coefficient on the principal diagonal
-           diag=T 
-           )
-  chart_pic_file
-}
-
-MyConfusionMatrix <- function(actuals, predictions, threshold=0.5, title=""){
-  cm <- caret::confusionMatrix(as.factor(ifelse(predictions>threshold,1,0)), actuals, threshold, dnn=c("Prediction", "Actual"), positive="1", mode="prec_recall")
-  ggplot(as.data.frame(cm$table), aes(Actual, Prediction, fill= Freq)) +
-    geom_tile() + geom_text(aes(label=Freq), fontface="bold") +
-    scale_fill_distiller(palette="Greens",guide="none", direction = 1) +
-    labs(x = "Actual",y = "Prediction", title=title, subtitle=
-           paste(
-             "Precision at 0.5 threshold:",
-             round(precision(actuals,predictions,threshold),3)*100, "%")) +
-    scale_x_discrete(labels=c("Default", "Fully Paid")) +
-    scale_y_discrete(labels=c("Fully Paid","Default"), limits=rev) +
-    theme_minimal() + 
-    theme(plot.title = element_text(hjust = 0.5, size = 16),
-          plot.subtitle = element_text(hjust = 0.5, size = 12)) 
-}
-
-
-plot_precision_vs_npred <- function(actuals, predictions, title=""){ ### non serve più, cancellare T.T
-  p <- vector("list", length(predictions))
-  names(p) <- names(predictions)
-  n <- vector("list", length(predictions))
-  names(n) <- names(predictions)
-  for (i in 1:length(predictions)){
-      for (threshold in seq(0,1,0.01)){
-        p[[i]] <- c(p[[i]],precision(actuals, predictions[[i]], threshold = threshold))
-        n[[i]] <- c(n[[i]],length(predictions[[i]][predictions[[i]] >= threshold]))
-      }
-  }
-  
-  res <- as.data.frame(list(p=p,n=n))
-  res$i <- 1:nrow(res)
-  res <- gather(res,var,val,-i) %>% separate(var, c("variable", "Model")) %>% reshape(idvar = c("i","Model"), timevar = "variable", direction = "wide")
-  names(res)[c(3,4)] <- c("p","n")
-  
-  res <- res %>% arrange(Model, p)
-  plotly::plot_ly(res) %>%
-  plotly::add_trace(x=~p*100, y = ~n/length(actuals)*100, yaxis="y", type="scatter", mode = "lines+markers", color=~Model, opacity = 1) %>% 
-  plotly::add_trace(x=~p*100, y = ~round(n/length(actuals)*4e4), yaxis="y2", type="scatter", mode = "lines+markers", color=~Model, opacity = 0, showlegend=F) %>%     
-  plotly::layout(title = "Results",
-                 xaxis = list(title = 'Precision',  ticksuffix = "%"),
-                 yaxis = list(title = 'Percentage of predicted Fully Paid', ticksuffix = "%", gridcolor=rgb(0, 0, 0, max = 255, alpha = 80)),
-                 yaxis2= list(tickfont = list(color = "red"), gridcolor=rgb(255, 0, 0, max = 255, alpha = 20), overlaying = "y",side = "right", automargin = T,title = "Number of predicted Fully Paid"),
-                 legend = list(x=0.7,y=0.9))
-
-}
-
-precision_at_k <- function(actuals, predictions){
-  d <- data.frame(actuals = actuals, score = predictions) %>%
-    arrange(-score)
-  d$k <- 1:nrow(d)
-  p_at_k <- rep(0,nrow(d))
-  n_relevant <- 0
-  for (k in 1:nrow(d)){
-    if (d[k,"actuals"] == 1){
-      n_relevant <- n_relevant+1
-    }
-    p_at_k[k] <- n_relevant/k
-  }
-  p_at_k
-}
-
-plot_precision_at_k <- function(actuals, predictions, resolution_k=100){
-  test_size <- length(actuals)
-  p_at_k <- vector("list", length(predictions))
-  names(p_at_k) <- names(predictions)
-  for (i in 1:length(predictions)){
-    p_at_k[[i]] <- precision_at_k(actuals, predictions[[i]])
-  }
-  p_at_k <-  p_at_k %>% 
-    sapply('[', seq(max(sapply(p_at_k, length)))) %>% 
-    as.data.frame()
-  p_at_k <- p_at_k %>%
-    mutate(k=1:nrow(p_at_k)) %>%
-    gather(Model, p,-k) %>%
-    filter( k == 1 | k %% resolution_k == 0)
-  plotly::plot_ly(p_at_k) %>%
-  plotly::add_trace(x=~round(k/test_size*100,3), y = ~p*100, type="scatter", mode = "lines+markers", color=~Model) %>% 
-  plotly::add_trace(x=~round(k/test_size*4e4), y = ~p*100, xaxis="x2", type="scatter", mode = "lines+markers", color=~Model, opacity = 0, showlegend=F) %>%     
-  plotly::layout(xaxis = list(title = 'K', ticksuffix= "%", gridcolor=rgb(0, 0, 0, max = 255, alpha = 60)),
-                 xaxis2= list(tickfont = list(color = "red"), gridcolor=rgb(255, 0, 0, max = 255, alpha = 20), overlaying = "x",side = "top", automargin = T, title = list(text="Expected K")),
-                 yaxis = list(title = 'Precision @ K', ticksuffix = "%", gridcolor=rgb(0, 0, 0, max = 255, alpha = 60)),
-                 legend = list(x=0.8,y=0.9))
-} 
+source("data_preparation/CustomFunctions.R")
 ```
 
 
@@ -427,7 +297,7 @@ acc <- acc %>%
   mutate(home_ownership = as.factor(as.character(home_ownership))) %>% # remove empty levels
   select(-loan_status)
 set.seed(1000)
-source("data_preparation/outliers.R", print.eval = T)
+source("data_preparation/Outliers.R", print.eval = T)
 ```
 
 A seguito di questa prima pulizia vengono presentate alcune visualizzazioni utili alla comprensione del contesto.
@@ -483,7 +353,7 @@ Si osserva come il dataset sia fortemente sbilanciato, infatti il 79% dei presti
 ## Altre Distribuzioni
 
 ```{r fig.height=6, fig.width=10, message=FALSE, warning=FALSE}
-source("data_preparation/all_violin.R", print.eval = T)
+source("data_preparation/AllViolins.R", print.eval = T)
 ```
 
 Osservando le distribuzioni degli attributi numerici si nota come la rimozione degli outliers abbia avuto successo, tuttavia sono presenti distribuzioni fortemente asimmetriche. Anche alcuni attributi categorici presentano sbilanciamento dei livelli.
@@ -626,7 +496,7 @@ p3 <- MyConfusionMatrix(test$y, yhat.glm.weighted, title="Logit Weighted")
 p1+p2+p3
 ```
 
-```{r}
+```{r fig.width=10, fig.height=6}
 plot_precision_at_k(test$y, list("Logit Unbalanced"=yhat.glm.unbalanced, "Logit Undersampling"=yhat.glm.under, "Logit Weighted"=yhat.glm.weighted))
 ```
 
@@ -720,7 +590,7 @@ La tecnica della PCA ci consente di ottenere un modello più parsimonioso avendo
 
 Un'altra tecnica utile al contenimento del costo computazionale del modello è la Best Subset Selection, ovvero la selezione del miglior subset di regressori, nel nostro caso valutata sull'AIC. 
 
-```{r}
+```{r results='hide'}
 fit.glm <- glm(y~., train, family="binomial")
 
 glm.backward <- step(fit.glm, direction = "backward", trace=T, k=2)
@@ -728,7 +598,10 @@ glm.backward <- step(fit.glm, direction = "backward", trace=T, k=2)
 fit.glm.backward <- glm(glm.backward$formula, train, family = "binomial")
 
 yhat.glm.backward <- predict(fit.glm.backward, test, type="response")
+```
 
+
+```{r}
 MyConfusionMatrix(test$y, yhat.glm.backward, title = "Logit - Backward Elimination")
 
 cat("Accuracy = ", 1-misClassError(test$y, yhat.glm.backward))
@@ -876,9 +749,13 @@ Il valore dell'AUC ci indica che siamo in presenza del miglior modello fin'ora o
 
 ## Modello di Cox
 
-In order to perform survival analysis we define three possible outcomes for a lending: "Fully Paid", "Default" and "Pre-Paid", whose meanings are pretty clear.
-
-To distinguish between Regalur Payment and Early Payment we define a tolerance of -1 month since our dates are all represented as month-year.
+L'ultimo modello presentato è il Modello di Regressione di Cox, appartenente alla classe dei Modelli di Sopravvivenza. Esso nasce nel contesto dell'Analisi della Sopravvivenza, in cui si studiano gli effetti di trattamenti medici o di fattori di rischio specifici. Questo tipo di analisi ricerca una stima della *"Sopravvivenza"* dei pazienti in un determinato periodo di osservazione (la parola *"Sopravvivenza"* non assume necessariamente un significato letterale ma a seconda del contesto indica l'assenza di uno specifico evento avverso, ad esemoio se si studia il beneficio dell'impianto di una protesi l'evento avverso può essere la frattura dell'osso). \
+Per poter applicare i metodi della Survival Analysis e in particolare il Modello di Cox occorre fare le seguenti osservazioni:
+- I prestiti sono interpretati come dei pazienti;
+- Il Default del prestito è l'evento avverso;
+- Non sono presenti dati censurati;
+- L'evento di Early Payment può essere considerato come rischio competitivo all'evento di Default;
+- È presente per costruzione un time-point fisso all'evento, ovvero il termine del prestito, oltre il quale non si hanno più dati. Fanno eccezione i prestiti ripagati in ritardo che complicano notevolmente l'analisi, per questi si può assumere che siano stati pagati al termine come semplificazione.
 
 ```{r, message=F}
 prep_surv <- function(d, plots=T){
@@ -928,7 +805,6 @@ ret$pie
 
 ```{r}
 ### Check if everything is as intended
-
  ggplot(train_surv) + 
       geom_histogram(aes(x=actual_duration_to_term, y = ..count../sum(nrow(train_surv)), fill=as.character(status)), bins=25) +
       scale_fill_manual(labels=c("Fully Paid", "Default"), values=c("darkgreen","darkred")) + 
@@ -940,10 +816,6 @@ ret$pie
       theme(plot.title = element_text(hjust = 0.5, size = 16),
           plot.subtitle = element_text(hjust = 0.5, size = 12))
 ```
-
-### Survival function
-
-### Cox
 
 ```{r}
 train_surv <- train_surv %>% select(all_of(model_variables), actual_duration_to_term, status) %>% select(-y)
@@ -961,7 +833,7 @@ ggsurvplot(surv.cox, xlab = "Years", legend= "none", ggtheme = theme_minimal())
 summary(surv.cox, times = 0.5)
 ```
 
-#### Valutare assunzione «Proportional Hazards»
+### Valutazione assunzione «Proportional Hazards»
 
 Per valutare l'assunzione di Proportional Hazards per le covariate si procede dapprima con un check visuale della log(-log(Survival)), che valuta l'assunzione di PH per ogni covariata indipendentemente dalle altre, e successivamente ci si serve dei residui Schoenfeld per valutare l'assunzione di PH tenendo conto anche dalle altre covariate (modello multivariato).
 
@@ -969,7 +841,7 @@ Per valutare l'assunzione di Proportional Hazards per le covariate si procede da
 
 2. Schoenfeld residuals --- Graphical check
 
-##### 1. log[-log(SKM (t))] --- Graphical check
+#### 1. log[-log(SKM (t))] --- Graphical check
 
 Per l'assunzione di PH abbiamo: $S_X(t) = S_0(t) e^{(\beta' X)}$
 che può essere riscritta come: $log(-log(S_X(t))) - log(-log(S_0(t))) = \beta' X$
@@ -977,40 +849,17 @@ ne segue che la differenza tra i due logaritmi è costante rispetto al tempo se 
 
 Questo tipo di verifica può essere fatto unicamente sulle variabili non continue, poiché il $log(-log(S_0(t)))$ deve essere confrontato con $log(-log(S_X(t)))$ per ciascun valore di X su tutto l'intervallo temporale.
 
-```{r include=F}
+```{r}
 par(mfrow=c(2,2),mar=c(4,4,2,2))
-
-km.addr_state <- survfit(Surv(actual_duration_to_term, status) ~ addr_state, data=train_surv)
-plot(km.addr_state, fun="cloglog", ylab="log(-log(Survival))", xlab="log(time_to_term)", main="Check PH assumption of address state")
-
-km.appl_type <- survfit(Surv(actual_duration_to_term, status) ~ application_type, data=train_surv)
-plot(km.appl_type, fun="cloglog", ylab="log(-log(Survival))", xlab="log(time_to_term)", main="Check PH assumption of application type")
-
-km.emp_length <- survfit(Surv(actual_duration_to_term, status) ~ emp_length, data=train_surv)
-plot(km.emp_length, fun="cloglog", ylab="log(-log(Survival))", xlab="log(time_to_term)", main="Check PH assumption of employment length")
-
-km.home_ownership <- survfit(Surv(actual_duration_to_term, status) ~ home_ownership, data=train_surv)
-plot(km.addr_state, fun="cloglog", ylab="log(-log(Survival))", xlab="log(time_to_term)", main="Check PH assumption of home ownership")
-
-km.init_list <- survfit(Surv(actual_duration_to_term, status) ~ initial_list_status, data=train_surv)
-plot(km.init_list, fun="cloglog", ylab="log(-log(Survival))", xlab="log(time_to_term)", main="Check PH assumption of initial list status")
-
-km.purpose <- survfit(Surv(actual_duration_to_term, status) ~ purpose, data=train_surv)
-plot(km.purpose, fun="cloglog", ylab="log(-log(Survival))", xlab="log(time_to_term)", main="Check PH assumption of purpose")
-
-km.term <- survfit(Surv(actual_duration_to_term, status) ~ term, data=train_surv)
-plot(km.term, fun="cloglog", ylab="log(-log(Survival))", xlab="log(time_to_term)", main="Check PH assumption of term")
-
-km.ver_status <- survfit(Surv(actual_duration_to_term, status) ~ verification_status, data=train_surv)
-plot(km.ver_status,fun="cloglog", ylab="log(-log(Survival))", xlab="log(time_to_term)", main="Check PH assumption of verification status")
-
-km.fico_class <- survfit(Surv(actual_duration_to_term, status) ~ fico_class, data=train_surv)
-plot(km.fico_class, fun="cloglog", ylab="log(-log(Survival))", xlab="log(time_to_term)", main="Check PH assumption of fico class")
+for (variable in model_variables[model_variables %notin% c(model_num_variables,"y")]){
+  survfit(as.formula(paste("Surv(actual_duration_to_term, status) ~", variable)), data=train_surv) %>% 
+    plot(fun="cloglog", ylab="log(-log(Survival))", xlab="log(time_to_term)", main=paste("Check PH assumption of", variable))
+}
 ```
 
 L'assunzione di PH pare valere per tutte le variabili categoriche, ad eccezione di *fico_class*.
 
-##### 2. Schoenfeld residuals --- Graphical check
+#### 2. Schoenfeld residuals --- Graphical check
 
 I residui Schoenfeld sono definiti come: $r_j = x_j - E[x_j|R_j]$ \
 dove $x_j$ è la covariata del prestito che *fallisce* al tempo $t_{(j)}$ e $R_j$ è il risk set al tempo $t_{(j)}$.
@@ -1058,21 +907,11 @@ model.cox.strata <- coxph(
     survival::strata(home_ownership) +
     survival::strata(addr_state),
   train_surv, x =T, y=T) 
-summary(model.cox.strata)
 ```
 
-### Discrimination
+### Predizioni
 
 ```{r}
-plotROC(score,times=1,cens.method="local")
-title(main="Time-dependent ROC at end of lending")
-```
-
-### Predictions
-
-```{r}
-#rm(list=setdiff(ls(), c("train_surv", "test_surv", "train", "test", "yhat.glm.under", "yhat.backward", "yhat.lasso", "yhat.ridge", "yhat.rf", "model.cox.base", "model.cox.strata")))
-
 yhat.cox.strata <- c()
 for (i in (seq(1,nrow(test_surv),ceiling(nrow(test_surv)/10))-1)){
   fit.cox.strata<-survfit(model.cox.strata,newdata=test_surv[(i+1):(i+ceiling(nrow(test_surv)/10)),])
@@ -1085,38 +924,24 @@ InformationValue::misClassError((1-test_surv$status), yhat.cox.strata)
 
 MyConfusionMatrix(as.factor(as.character(1-test_surv$status)), yhat.cox.strata, threshold = 0.5)
 
-plotROC(score,times=1,cens.method="local")
+InformationValue::plotROC(1-test_surv$status, yhat.cox.strata)
 ```
 
-Il modello è il peggiore ottenuto, ciò non stupisce poichè è stata tenuta fuori la variabile *int_rate* risultata finora la più significativa. Tale variabile, insieme alle altre variabili numeriche per cui non vale l'assunzione di PH, può essere reinserita nel modello con un termine di interazione con la variabile temporale, ciò si lascia a una possibile futura implementazione.
+Il modello è il peggiore tra quelli testati, ma ciò non stupisce poichè è stata tenuta fuori la variabile *int_rate* risultata finora la più significativa. Tale variabile, insieme alle altre variabili numeriche per cui non vale l'assunzione di PH, può essere reinserita nel modello con un termine di interazione con la variabile temporale, cosa che viene lasciata a una possibile futura implementazione.
 
-# Conclusioni
+# Risultati e Conclusioni
 
 I modelli ottenuti hanno dimostrato tutti una discreta performance, che è stata finora valutata in termini di AUC e di Precision alla threshold di 0.5. \
 I modelli possono essere visti come dei Recommender Systems, ovvero sistemi che offrono raccomandazioni su quali prestiti scegliere per investire. La metrica che viene utilizzata per la valutazione finale è di conseguenza la metrica tipica di questo tipo di sistemi, ovvero la Precision\@K. Avendo l'utente scelto un valore K di investimenti su cui puntare, il modello ritorna i K prestiti la cui probabilità di essere ripagati è massima, di questi K investimenti si valuta la Precision ovvero il numero di quelli che vengono effettivamente ripagati. 
 
 Forse si riesce a fare anche i calibration plot.
 
-```{r}
-score <- Score(list("LogReg"=fit.glm.under,
-                    "LogReg PCA"=fit.pca,
-                    "LogRidge"=fit.ridge.cv,
-                    "LogRegLasso"=fit.lasso.cv,
-                    "RandFor"=fit.rf.150t),
-              formula=y~1,
-              data=test, conf.int=F,
-              plots=c("calibration","ROC"),
-              progress.bar=1)
-
-score <- Score(list("Cox"=fit.cox.strata),
-              formula=y~1,
-              data=test, conf.int=F,
-              plots=c("calibration","ROC"),
-              progress.bar=1)
-
-plotCalibration(score,times=0.5, cens.method="local",method="quantile", q=20, auc.in.legend = F)
-title(main="Calibration at half term")
+```{r message=F, warning=F}
+MyCalibrationPlot(test$y, list("Logit UnderSampling"=yhat.glm.under, "Logit PCA"=yhat.pca, "Logit Backward Elimination"=yhat.glm.backward, "Logit Ridge"=unname(yhat.ridge), "Logit Lasso"=unname(yhat.lasso),"Random Forest"=yhat.rf[,2], "Cox"= yhat.cox.strata))
 ```
+
+Si vede come tutti i modelli ottenuti sottostimino le probabilità per i prestiti di essere ripagati, in altri termini abbiamo ottenuto modelli pessimistici. Tuttavia ciò non ci stupisce affatto, infatti tale comportamento è frutto del bilanciamento del training set che predilige l'accuratezza sulla classe *Default* piuttosto che ottenere predizioni complessivamente accurate. \
+Occorre quindi considerare come i valori predetti dai modelli non possano essere correttamente interpretati come delle probabilità, ma semplicemente come dei punteggi di confidenza.
 
 ```{r fig.width=10, fig.height=6}
 plot_precision_at_k(test$y, list("Logit UnderSampling"=yhat.glm.under, "Logit PCA"=yhat.pca, "Logit Backward Elimination"=yhat.glm.backward, "Logit Ridge"=unname(yhat.ridge), "Logit Lasso"=unname(yhat.lasso),"Random Forest"=yhat.rf[,2], "Cox"=yhat.cox.strata))
